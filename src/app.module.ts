@@ -1,0 +1,76 @@
+import {
+    MiddlewareConsumer,
+    Module,
+    NestMiddleware,
+    NestModule,
+} from "@nestjs/common";
+import { AppController } from "./app.controller";
+import { AppService } from "./app.service";
+import { PrismaModule } from "nestjs-prisma";
+import { AuthController } from "./controllers/auth.controller";
+import { AuthService } from "./services/auth.service";
+import { JwtModule } from "@nestjs/jwt";
+import { JwtConstant } from "./constants/jwt.constant";
+import { UsersController } from "./controllers/users.controller";
+import { UsersService } from "./services/users.service";
+import { AuthMiddleware } from "./middlewares/auth.middleware";
+import { MailerModule } from "@nestjs-modules/mailer";
+import { EmailService } from "./services/email.service";
+import { CodesController } from "./controllers/codes.controller";
+import { DecksController } from "./controllers/decks.controller";
+import { CodesService } from "./services/codes.service";
+import { DecksService } from "./services/decks.service";
+import { DecksCardsController } from "./controllers/decks-cards.controller";
+import { DecksCardsService } from "./services/decks-cards.service";
+import { MediaController } from "./controllers/media.controller";
+import { MediaService } from "./services/media.service";
+import { ServeStaticModule } from "@nestjs/serve-static";
+import { join } from "path";
+
+@Module({
+    imports: [
+        PrismaModule,
+        JwtModule.register({
+            secret: JwtConstant.secret,
+        }),
+        MailerModule.forRoot({
+            transport: {
+		port: 587,
+                service: "gmail",
+                host: "smtp.gmail.com",
+                auth: {
+                    user: process.env.EMAIL_USERNAME,
+                    pass: process.env.EMAIL_PASSWORD,
+                },
+            },
+        }),
+        ServeStaticModule.forRoot({
+            rootPath: join(__dirname, "..", "..", "public"),
+            serveRoot: "/public/",
+        }),
+    ],
+    controllers: [
+        AppController,
+        AuthController,
+        UsersController,
+        CodesController,
+        DecksController,
+        DecksCardsController,
+        MediaController,
+    ],
+    providers: [
+        AppService,
+        AuthService,
+        UsersService,
+        EmailService,
+        CodesService,
+        DecksService,
+        DecksCardsService,
+        MediaService,
+    ],
+})
+export class AppModule implements NestModule {
+    configure(consumer: MiddlewareConsumer) {
+        consumer.apply(AuthMiddleware).forRoutes("*");
+    }
+}

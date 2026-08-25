@@ -1,3 +1,1 @@
-export const JwtConstant = {
-    secret: "sectet-123-456-789-flash-card-project",
-};
+export const JwtConstant = { secret: process.env.JWT_SECRET || "sectet-123-456-789-flash-card-project", };

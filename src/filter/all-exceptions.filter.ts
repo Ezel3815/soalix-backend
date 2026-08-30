@@ -44,13 +44,14 @@ import {
         }
       }
   
-      response.status(status).json(      console.log(`ERROR ${status} on ${request.method} ${request.url}:`, message, details);{
+            response.status(status).json({
         status,
         message,
         details,
         path: request.url,
         timestamp: new Date().toISOString(),
       });
+
       console.log(`ERROR ${status} on ${request.method} ${request.url}:`, message, details);
     }
   }

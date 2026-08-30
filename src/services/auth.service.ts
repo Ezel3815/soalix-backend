@@ -185,7 +185,6 @@ export class AuthService {
     }
 
     async login(loginDto: LoginDto) {
-        console.log(loginDto.password, md5(loginDto.password));
 
         try {
             const user = await this.prismaService.user.update({

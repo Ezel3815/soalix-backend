@@ -14,7 +14,6 @@ import { JwtConstant } from "./constants/jwt.constant";
 import { UsersController } from "./controllers/users.controller";
 import { UsersService } from "./services/users.service";
 import { AuthMiddleware } from "./middlewares/auth.middleware";
-import { MailerModule } from "@nestjs-modules/mailer";
 import { EmailService } from "./services/email.service";
 import { CodesController } from "./controllers/codes.controller";
 import { DecksController } from "./controllers/decks.controller";
@@ -32,17 +31,6 @@ import { join } from "path";
         PrismaModule,
         JwtModule.register({
             secret: JwtConstant.secret,
-        }),
-        MailerModule.forRoot({
-            transport: {
-		port: 587,
-                service: "gmail",
-                host: "smtp.gmail.com",
-                auth: {
-                    user: process.env.EMAIL_USERNAME,
-                    pass: process.env.EMAIL_PASSWORD,
-                },
-            },
         }),
         ServeStaticModule.forRoot({
             rootPath: join(__dirname, "..", "..", "public"),

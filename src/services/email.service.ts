@@ -9,7 +9,7 @@ export class EmailService {
     async sendVerificationEmail(user: User) {
         try {
             await this.mailService.sendMail({
-                from: "flash-cards@gmail.com",
+                from: "from: process.env.EMAIL_USERNAME",
                 to: user.email,
                 subject: "Verification code",
                 text: `Hello ${user.name} Your verification code is ${user.activation_code}`,

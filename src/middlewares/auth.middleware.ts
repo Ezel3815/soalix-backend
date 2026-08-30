@@ -18,8 +18,6 @@ export class AuthMiddleware implements NestMiddleware {
     async use(req: Request, res: Response, next: NextFunction) {
         const token = req.headers.authorization ?? "";
 
-        console.log(`${req.method}: ${req.originalUrl}`);
-        console.log(req.body);
 
         if (token) {
             const user = await this.authService.getUserFromToken(token);

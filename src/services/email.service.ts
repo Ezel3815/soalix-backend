@@ -22,7 +22,7 @@ export class EmailService {
     async sendResetPasswordEmail(user: User) {
         try {
             await this.mailService.sendMail({
-                from: "flash-cards@gmail.com",
+                from: process.env.EMAIL_USERNAME,
                 to: user.email,
                 subject: "Verification code",
                 text: `Hello ${user.name} Your reset password code is ${user.reset_password_code}`,

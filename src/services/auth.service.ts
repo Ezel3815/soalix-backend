@@ -28,12 +28,18 @@ export class AuthService {
     ) {}
 
     async regiser(registerDto: RegisterDto) {
-        const alreadyExisted = await this.prismaService.user.findUnique({
+                const alreadyExisted = await this.prismaService.user.findUnique({
             where: { email: registerDto.email },
         });
 
-        if (alreadyExisted) {
+        if (alreadyExisted && alreadyExisted.status !== UserStatus.PENDING) {
             GenerateBadRequestException(["Already Existed User"]);
+        }
+
+        if (alreadyExisted && alreadyExisted.status === UserStatus.PENDING) {
+            await this.prismaService.user.delete({
+                where: { email: registerDto.email },
+            });
         }
 
         const activation_code = generateRandomCode(6);

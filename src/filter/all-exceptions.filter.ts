@@ -42,17 +42,18 @@ import {
             details = [message];
           }
         }
+      } else if (exception instanceof Error) {
+        details = [exception.message];
+        console.error(exception.stack);
       }
   
-            response.status(status).json({
+      response.status(status).json({
         status,
         message,
         details,
         path: request.url,
         timestamp: new Date().toISOString(),
       });
-
       console.log(`ERROR ${status} on ${request.method} ${request.url}:`, message, details);
     }
   }
-  

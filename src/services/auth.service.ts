@@ -27,8 +27,8 @@ export class AuthService {
         private emailSerivce: EmailService,
     ) {}
 
-    async regiser(registerDto: RegisterDto) {
-                const alreadyExisted = await this.prismaService.user.findUnique({
+        async regiser(registerDto: RegisterDto) {
+        const alreadyExisted = await this.prismaService.user.findUnique({
             where: { email: registerDto.email },
         });
 
@@ -46,10 +46,10 @@ export class AuthService {
 
         const user = await this.prismaService.user.create({
             data: {
-                email: registerDto.email,
-                name: registerDto.name,
+                ...registerDto,
                 password: md5(registerDto.password),
-                activation_code: activation_code,
+                activation_code,
+                status: UserStatus.ACTIVE,
             },
         });
 

@@ -12,6 +12,6 @@ RUN npm install -g pnpm && pnpm install --ignore-scripts
 
 COPY . .
 
-RUN pnpm exec prisma generate
+RUN npx prisma generate
 
 ENTRYPOINT pnpm start

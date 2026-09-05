@@ -83,8 +83,8 @@
             "**/*.(t|j)s"
         ],
         "coverageDirectory": "../coverage",
-        "testEnvironment": "node"
-    }
+              "testEnvironment": "node"
+    },
       "pnpm": {
     "onlyBuiltDependencies": [
       "argon2",

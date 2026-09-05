@@ -85,4 +85,12 @@
         "coverageDirectory": "../coverage",
         "testEnvironment": "node"
     }
+      "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "prisma",
+      "@prisma/engines",
+      "@scarf/scarf"
+    ]
+  }
 }

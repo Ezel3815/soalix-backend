@@ -7,22 +7,20 @@ import {
     GetRandomNameForFile,
     SaveFile,
 } from "src/utils/files.utils";
-
 @Injectable()
 export class MediaService {
     constructor(private prismaService: PrismaService) {}
-
     async create(file: Express.Multer.File, type: MediaType) {
-        const name = GetRandomNameForFile(file);
-        SaveFile(name, file.buffer);
-        return await this.prismaService.media.create({ data: { name, type } });
+        const originalName = GetRandomNameForFile(file);
+        const url = await SaveFile(originalName, file.buffer);
+        return await this.prismaService.media.create({
+            data: { name: url, type },
+        });
     }
-
     async delete(name) {
-        DeleteFile(name);
+        await DeleteFile(name);
         return await this.prismaService.media.delete({ where: { name } });
     }
-
     async deleteAllUnlinked() {
         const expiredDate = new Date();
         expiredDate.setHours(expiredDate.getHours() - 1);
@@ -34,26 +32,21 @@ export class MediaService {
                 document_card: null,
             },
         });
-
-        media.forEach((m) => {
-            DeleteFile(m.name);
-        });
-
+        for (const m of media) {
+            await DeleteFile(m.name);
+        }
         await this.prismaService.media.deleteMany({
             where: { name: { in: media.map((m) => m.name) } },
         });
     }
-
     async deleteForCard(cardId: number) {
         const card = await this.prismaService.card.findUnique({
             where: { id: cardId },
         });
-
         if (card.back_image_name) await this.delete(card.back_image_name);
         if (card.front_image_name) await this.delete(card.front_image_name);
         if (card.document_name) await this.delete(card.document_name);
     }
-
     async readDocuments(user: User) {
         const documents = await this.prismaService.media.findMany({
             where: {
@@ -79,7 +72,6 @@ export class MediaService {
                 document_card: true,
             },
         });
-
         return documents.map((deck) => DocumentOutDto(deck));
     }
 }

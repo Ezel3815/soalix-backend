@@ -27,37 +27,35 @@ export class AuthService {
         private emailSerivce: EmailService,
     ) {}
 
-        async regiser(registerDto: RegisterDto) {
-        const alreadyExisted = await this.prismaService.user.findUnique({
-            where: { email: registerDto.email },
-        });
+      import {
+    Injectable,
+    NestMiddleware,
+    UnauthorizedException,
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { Request, Response, NextFunction } from "express";
+import { JwtConstant } from "src/constants/jwt.constant";
+import { AuthService } from "src/services/auth.service";
 
-        if (alreadyExisted && alreadyExisted.status !== UserStatus.PENDING) {
-            GenerateBadRequestException(["Already Existed User"]);
+@Injectable()
+export class AuthMiddleware implements NestMiddleware {
+    constructor(
+        private jwtService: JwtService,
+        private authService: AuthService,
+    ) {}
+
+    async use(req: Request, res: Response, next: NextFunction) {
+        const token = req.headers.authorization ?? "";
+
+
+        if (token) {
+            const user = await this.authService.getUserFromToken(token);
+            req["user"] = user;
         }
 
-        if (alreadyExisted && alreadyExisted.status === UserStatus.PENDING) {
-            await this.prismaService.user.delete({
-                where: { email: registerDto.email },
-            });
-        }
-
-        const activation_code = generateRandomCode(6);
-
-        const user = await this.prismaService.user.create({
-            data: {
-                ...registerDto,
-                password: md5(registerDto.password),
-                activation_code,
-                status: UserStatus.ACTIVE,
-            },
-        });
-
-        this.emailSerivce.sendVerificationEmail(user);
-
-        return UserOutDto(user);
+        next();
     }
-
+}
 
     async regiserWithOutCode(registerDto: RegisterDto) {
         const alreadyExisted = await this.prismaService.user.findUnique({

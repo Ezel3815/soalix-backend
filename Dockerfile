@@ -7,7 +7,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm install -g pnpm && pnpm install --ignore-scripts
+RUN npm install -g pnpm && pnpm install --no-frozen-lockfile --ignore-scripts
 
 
 COPY . .

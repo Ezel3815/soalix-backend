@@ -10,7 +10,8 @@ import { CreateUserDto } from "src/dtos/users/create-user.dto";
 import { UpdateMeDto } from "src/dtos/users/update-me.dto";
 import { UpdatePasswordDto } from "src/dtos/users/update-password.dto";
 import { UpdateUserDto } from "src/dtos/users/update-user.dto";
-import { UserOutDto } from "src/dtos/users/user.out-dto";
+import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
+import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import { v7 as uuid } from "uuid";
@@ -30,7 +31,6 @@ export class UsersService {
                 role: createUserDto.role,
             },
         });
-
         return UserOutDto(user);
     }
 
@@ -42,11 +42,9 @@ export class UsersService {
             orderBy: findQueryDto.sort ?? { created_at: "desc" },
             include: { _count: true },
         });
-
         const count = await this.prismaService.user.count({
             where: findQueryDto.filter ?? {},
         });
-
         return {
             count: count,
             data: users.map(UserOutDto),
@@ -56,6 +54,106 @@ export class UsersService {
     async readOne(id: number) {
         const user = await this.prismaService.user.findUnique({
             where: { id },
+        });
+        return UserOutDto(user);
+    }
+
+    async getProfile(targetUserId: number, requestingUserId: number) {
+        const user = await this.prismaService.user.findUnique({
+            where: { id: targetUserId },
+        });
+        if (!user) GenerateBadRequestException(["User does not exist"]);
+
+        const followersCount = await this.prismaService.follow.count({
+            where: { followingId: targetUserId },
+        });
+        const followingCount = await this.prismaService.follow.count({
+            where: { followerId: targetUserId },
+        });
+
+        const followingRecord = await this.prismaService.follow.findUnique({
+            where: {
+                followerId_followingId: {
+                    followerId: requestingUserId,
+                    followingId: targetUserId,
+                },
+            },
+        });
+        const isFollowing = !!followingRecord;
+
+        let isFriend = false;
+        if (isFollowing) {
+            const reverseRecord = await this.prismaService.follow.findUnique({
+                where: {
+                    followerId_followingId: {
+                        followerId: targetUserId,
+                        followingId: requestingUserId,
+                    },
+                },
+            });
+            isFriend = !!reverseRecord;
+        }
+
+        return UserProfileOutDto(
+            user,
+            followersCount,
+            followingCount,
+            isFollowing,
+            isFriend,
+        );
+    }
+
+    async follow(followerId: number, followingId: number) {
+        if (followerId === followingId) {
+            GenerateBadRequestException(["You can't follow yourself"]);
+        }
+
+        const targetUser = await this.prismaService.user.findUnique({
+            where: { id: followingId },
+        });
+        if (!targetUser) GenerateBadRequestException(["User does not exist"]);
+
+        const existing = await this.prismaService.follow.findUnique({
+            where: {
+                followerId_followingId: { followerId, followingId },
+            },
+        });
+        if (existing) GenerateBadRequestException(["Already following this user"]);
+
+        await this.prismaService.follow.create({
+            data: { followerId, followingId },
+        });
+
+        return true;
+    }
+
+    async unfollow(followerId: number, followingId: number) {
+        await this.prismaService.follow.deleteMany({
+            where: { followerId, followingId },
+        });
+        return true;
+    }
+
+    async updateProfile(userId: number, updateProfileDto: UpdateProfileDto) {
+        if (updateProfileDto.username) {
+            const existing = await this.prismaService.user.findUnique({
+                where: { username: updateProfileDto.username },
+            });
+            if (existing && existing.id !== userId) {
+                GenerateBadRequestException(["Username already taken"]);
+            }
+        }
+
+        const user = await this.prismaService.user.update({
+            where: { id: userId },
+            data: {
+                username: updateProfileDto.username,
+                avatar_hair: updateProfileDto.avatar_hair,
+                avatar_hair_color: updateProfileDto.avatar_hair_color,
+                avatar_skin_color: updateProfileDto.avatar_skin_color,
+                avatar_clothing_color: updateProfileDto.avatar_clothing_color,
+                avatar_glasses: updateProfileDto.avatar_glasses,
+            },
         });
 
         return UserOutDto(user);
@@ -71,9 +169,7 @@ export class UsersService {
                 status: updateUserDto.status,
             },
         });
-
         if (!user) GenerateBadRequestException(["User does not exist"]);
-
         return UserOutDto(user);
     }
 
@@ -86,7 +182,6 @@ export class UsersService {
                 name: updateMeDto.name,
             },
         });
-
         return UserOutDto(user);
     }
 
@@ -100,9 +195,7 @@ export class UsersService {
                 password: md5(updatePasswordDto.old_password),
             },
         });
-
         if (!user) GenerateBadRequestException(["Wrong password"]);
-
         return UserOutDto(
             await this.prismaService.user.update({
                 where: {
@@ -118,9 +211,7 @@ export class UsersService {
     //TODO: delete all owned decks.
     async delete(id: number) {
         const user = await this.prismaService.user.delete({ where: { id } });
-
         if (!user) GenerateBadRequestException(["User does not exist"]);
-
         return true;
     }
 }

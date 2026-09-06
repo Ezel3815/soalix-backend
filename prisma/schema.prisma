@@ -169,4 +169,3 @@ model Follow {
 
   @@unique([followerId, followingId])
 }
-}

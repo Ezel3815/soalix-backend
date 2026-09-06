@@ -19,6 +19,7 @@ import { CreateUserDto } from "src/dtos/users/create-user.dto";
 import { UpdateMeDto } from "src/dtos/users/update-me.dto";
 import { UpdatePasswordDto } from "src/dtos/users/update-password.dto";
 import { UpdateUserDto } from "src/dtos/users/update-user.dto";
+import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
 import { AuthService } from "src/services/auth.service";
 import { UsersService } from "src/services/users.service";
 import { ApiTags } from "@nestjs/swagger";
@@ -45,6 +46,42 @@ export class UsersController {
     @Get("me")
     async readMe(@DUser() user: User) {
         return await this.service.readOne(user.id);
+    }
+
+    @DAuth()
+    @Put("me/profile")
+    async updateMyProfile(
+        @DUser() user: User,
+        @Body() updateProfileDto: UpdateProfileDto,
+    ) {
+        return await this.service.updateProfile(user.id, updateProfileDto);
+    }
+
+    @DAuth()
+    @Get(":id/profile")
+    async getProfile(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.getProfile(id, user.id);
+    }
+
+    @DAuth()
+    @Post(":id/follow")
+    async follow(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.follow(user.id, id);
+    }
+
+    @DAuth()
+    @Delete(":id/follow")
+    async unfollow(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.unfollow(user.id, id);
     }
 
     @DRole()

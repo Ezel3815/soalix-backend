@@ -53,6 +53,16 @@ model User {
   reset_password_code String?
   created_at          DateTime     @default(now())
   cards_answers       CardAnswer[]
+  username             String?      @unique
+  avatar_hair          String?
+  avatar_hair_color    String?
+  avatar_skin_color    String?
+  avatar_clothing_color String?
+  avatar_glasses       Boolean      @default(false)
+  current_streak       Int          @default(0)
+  last_study_date      DateTime?
+  following            Follow[]     @relation("Follower")
+  followers            Follow[]     @relation("Following")
 }
 
 model Deck {
@@ -149,4 +159,14 @@ model Media {
   back_card     Card?     @relation(name: "back_image_media")
   document_card Card?     @relation(name: "document_media")
   created_at    DateTime  @default(now())
+model Follow {
+  id           Int      @id @default(autoincrement())
+  followerId   Int
+  followingId  Int
+  created_at   DateTime @default(now())
+  follower     User     @relation("Follower", fields: [followerId], references: [id])
+  following    User     @relation("Following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
 }

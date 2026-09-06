@@ -159,6 +159,8 @@ model Media {
   back_card     Card?     @relation(name: "back_image_media")
   document_card Card?     @relation(name: "document_media")
   created_at    DateTime  @default(now())
+}
+
 model Follow {
   id           Int      @id @default(autoincrement())
   followerId   Int
@@ -166,6 +168,5 @@ model Follow {
   created_at   DateTime @default(now())
   follower     User     @relation("Follower", fields: [followerId], references: [id])
   following    User     @relation("Following", fields: [followingId], references: [id])
-
   @@unique([followerId, followingId])
 }

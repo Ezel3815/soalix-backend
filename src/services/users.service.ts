@@ -34,6 +34,24 @@ export class UsersService {
         return UserOutDto(user);
     }
 
+    async searchUsers(query: string, excludeUserId: number) {
+        if (!query || query.trim().length === 0) return [];
+
+        const users = await this.prismaService.user.findMany({
+            where: {
+                id: { not: excludeUserId },
+                OR: [
+                    { username: { contains: query } },
+                    { name: { contains: query } },
+                ],
+            },
+            take: 20,
+        });
+
+        return users.map(UserOutDto);
+    }
+    
+
     async read(findQueryDto: FindQueryDto) {
         const users = await this.prismaService.user.findMany({
             skip: findQueryDto.skip,

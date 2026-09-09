@@ -6,12 +6,11 @@ import {
     User,
     UserRole,
 } from "@prisma/client";
-import { CardOutDto } from "../cards/card.out-dto";
 
 export type DeckReqursive = Deck & {
     cards: (Card & { answers: CardAnswer[] })[];
     children?: DeckReqursive[];
-    users?: { user_id }[]; // <-- Correct this
+    users?: { user_id: number }[];
 };
 
 function countAnswers(cards: (Card & { answers: CardAnswer[] })[]) {
@@ -28,33 +27,116 @@ function countAnswers(cards: (Card & { answers: CardAnswer[] })[]) {
 
     return { easyGoodCount: easyGood, againCount: again, hardCount: hard };
 }
-export function DeckRecursiveOutDto(user: User, deck: DeckReqursive) {
-        const { cards, ...deckWithoutCards } = deck;
 
-    var  shared= deck.users.some(u => u.user_id === user.id);
-    var isLocked =user.role != UserRole.ADMIN && 
-    ((deck.public && shared ===false) ||( // public attribute consider as a locked 
-        (deck.type == DeckType.PACKAGE_DECK &&deck.children.length == 0) ||
-        (deck.type == DeckType.CARDS_DECK && deck.cards.length == 0)
-    ));
+/**
+ * Recursively counts every leaf card under this deck (including its own
+ * direct cards) and how many of those cards the user has answered at
+ * least once. This is the source of truth for whether a deck (subject /
+ * chapter / lesson, since they're all just "Deck" in the schema) counts
+ * as "completed" for unlocking purposes.
+ */
+function countProgressRecursive(deck: DeckReqursive): {
+    total: number;
+    attempted: number;
+} {
+    let total = deck.cards?.length ?? 0;
+    let attempted =
+        deck.cards?.filter((c) => (c.answers?.length ?? 0) > 0).length ?? 0;
 
-    
+    for (const child of deck.children ?? []) {
+        const childProgress = countProgressRecursive(child);
+        total += childProgress.total;
+        attempted += childProgress.attempted;
+    }
+
+    return { total, attempted };
+}
+
+function isDeckCompleted(deck: DeckReqursive): boolean {
+    const { total, attempted } = countProgressRecursive(deck);
+    // A deck with no cards anywhere under it can never be "completed" -
+    // it shouldn't be able to silently unlock the next chapter.
+    return total > 0 && attempted === total;
+}
+
+/**
+ * @param depth 0 = top-level subject, 1 = "chapter" (the level shown as
+ *              the lesson road on the home screen - sequential unlock
+ *              applies here), 2+ = everything nested inside a chapter,
+ *              which opens all at once as soon as the chapter is unlocked.
+ * @param siblings the deck's siblings at the same level (needed to check
+ *              "was the previous one finished" for sequential unlock).
+ * @param index the deck's position among `siblings`.
+ * @param parentUnlocked whether the parent deck itself is unlocked -
+ *              a locked parent always locks everything beneath it.
+ */
+export function DeckRecursiveOutDto(
+    user: User,
+    deck: DeckReqursive,
+    depth: number = 0,
+    siblings: DeckReqursive[] = [],
+    index: number = 0,
+    parentUnlocked: boolean = true,
+) {
+    const { cards, ...deckWithoutCards } = deck;
+
+    const shared = deck.users.some((u) => u.user_id === user.id);
+
+    // Pre-existing gating: not public/shared, or an empty package/deck.
+    const baseLocked =
+        user.role != UserRole.ADMIN &&
+        ((deck.public && shared === false) ||
+            (deck.type == DeckType.PACKAGE_DECK &&
+                deck.children.length == 0) ||
+            (deck.type == DeckType.CARDS_DECK && deck.cards.length == 0));
+
+    // Sequential unlock only enforced between chapters (depth === 1).
+    // A chapter unlocks once the previous chapter is fully completed.
+    let sequentialLocked = false;
+    if (user.role != UserRole.ADMIN && depth === 1 && index > 0) {
+        const previousSibling = siblings[index - 1];
+        sequentialLocked = !isDeckCompleted(previousSibling);
+    }
+
+    const isLocked = baseLocked || !parentUnlocked || sequentialLocked;
+
+    const completed = isDeckCompleted(deck);
+    const { total, attempted } = countProgressRecursive(deck);
+    const progressPercent =
+        total > 0 ? Math.round((attempted / total) * 100) : 0;
+
+    // The single chapter the home-screen road should highlight as
+    // "in progress" - the first unlocked-but-not-finished chapter.
+    const current = depth === 1 && !isLocked && !completed;
+
     const answerCounts = countAnswers(deck.cards);
 
     return {
         ...deckWithoutCards,
         editable: user.role == UserRole.ADMIN,
-         sharable: false,
-        
-      //  cards: deck?.cards?.map((card) => CardOutDto(card)),
+        sharable: false,
         easyGoodCount: answerCounts.easyGoodCount,
         againCount: answerCounts.againCount,
         hardCount: answerCounts.hardCount,
-        children:isLocked===true ?[]: deck?.children?.map((child) =>
-            DeckRecursiveOutDto(user, child),
-        ),
-
-       shared: deck.users.some(u => u.user_id === user.id),
-        locked:isLocked,
+        totalCards: total,
+        attemptedCards: attempted,
+        progressPercent,
+        completed,
+        current,
+        children:
+            isLocked === true
+                ? []
+                : deck?.children?.map((child, childIndex) =>
+                      DeckRecursiveOutDto(
+                          user,
+                          child,
+                          depth + 1,
+                          deck.children,
+                          childIndex,
+                          !isLocked,
+                      ),
+                  ),
+        shared,
+        locked: isLocked,
     };
 }

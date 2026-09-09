@@ -86,6 +86,17 @@ export class UsersController {
 
     @DRole()
     @Get(":id")
+    @DAuth()
+     @Get("search")
+async search(@DUser() user: User, @Query("q") q: string) {
+    return await this.service.searchUsers(q, user.id);
+}
+
+@DRole()
+@Get(":id")
+async readOne(@Param("id", ParseIntPipe) id: number) {
+    return await this.service.readOne(id);
+}
     async readOne(@Param("id", ParseIntPipe) id: number) {
         return await this.service.readOne(id);
     }

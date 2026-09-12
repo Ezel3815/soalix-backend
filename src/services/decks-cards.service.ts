@@ -12,6 +12,7 @@ import { BadRequestException, Inject, Injectable, forwardRef } from "@nestjs/com
 import { AnswerCardDto } from "src/dtos/cards/answer-card.dto";
 import { BulkUpdateAnswersDto } from "src/dtos/cards/bulk-update-answers.dto";
 import { log } from "console";
+import { xpForAnswer } from "src/utils/level.utils";
 
 @Injectable()
 export class DecksCardsService {
@@ -212,6 +213,10 @@ export class DecksCardsService {
     }
 
     async answer(user: User, cardId: number, answerCardDto: AnswerCardDto) {
+        const existing = await this.prismaService.cardAnswer.findUnique({
+            where: { user_id_card_id: { user_id: user.id, card_id: cardId } },
+        });
+
         await this.prismaService.cardAnswer.upsert({
             where: { user_id_card_id: { user_id: user.id, card_id: cardId } },
             create: {
@@ -221,6 +226,18 @@ export class DecksCardsService {
             },
             update: { answer: answerCardDto.answer, updated_at: new Date() },
         });
+
+        // XP only on a genuinely new answer — re-reviewing a card you've
+        // already answered shouldn't let XP be farmed repeatedly.
+        if (!existing) {
+            const xpGained = xpForAnswer(answerCardDto.answer);
+            if (xpGained > 0) {
+                await this.prismaService.user.update({
+                    where: { id: user.id },
+                    data: { xp: { increment: xpGained } },
+                });
+            }
+        }
     }
 
     async bulkAnswer(user:User,  bulkUpdateAnswersDto: BulkUpdateAnswersDto) {

@@ -13,6 +13,7 @@ import { AnswerCardDto } from "src/dtos/cards/answer-card.dto";
 import { BulkUpdateAnswersDto } from "src/dtos/cards/bulk-update-answers.dto";
 import { log } from "console";
 import { xpForAnswer } from "src/utils/level.utils";
+import { isSameUtcDay, isYesterday, startOfUtcDay } from "src/utils/date.utils";
 
 @Injectable()
 export class DecksCardsService {
@@ -238,6 +239,33 @@ export class DecksCardsService {
                 });
             }
         }
+
+        await this.updateStreak(user.id);
+    }
+
+    /// Studying at all today (any review, first-time or repeat) counts
+    /// toward the streak. Consecutive calendar days increment it,
+    /// missing a day resets it to 1, multiple reviews the same day are
+    /// a no-op (streak already counted for today).
+    private async updateStreak(userId: number) {
+        const user = await this.prismaService.user.findUnique({
+            where: { id: userId },
+        });
+        const today = startOfUtcDay(new Date());
+
+        if (user.last_study_date && isSameUtcDay(user.last_study_date, today)) {
+            return;
+        }
+
+        const newStreak =
+            user.last_study_date && isYesterday(user.last_study_date, today)
+                ? user.current_streak + 1
+                : 1;
+
+        await this.prismaService.user.update({
+            where: { id: userId },
+            data: { current_streak: newStreak, last_study_date: today },
+        });
     }
 
     async bulkAnswer(user:User,  bulkUpdateAnswersDto: BulkUpdateAnswersDto) {

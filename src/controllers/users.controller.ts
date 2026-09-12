@@ -1,3 +1,4 @@
+
 import {
     Body,
     Controller,
@@ -100,6 +101,12 @@ export class UsersController {
     @Get("me/missions")
     async missions(@DUser() user: User) {
         return await this.service.getDailyMissions(user.id);
+    }
+
+    @DAuth()
+    @Get("me/achievements")
+    async achievements(@DUser() user: User) {
+        return await this.service.getAchievements(user.id);
     }
 
     @DRole()

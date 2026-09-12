@@ -13,6 +13,7 @@ import { UpdateUserDto } from "src/dtos/users/update-user.dto";
 import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
 import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
 import { getLevelInfo } from "src/utils/level.utils";
+import { startOfUtcDay, isSameUtcDay } from "src/utils/date.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import { v7 as uuid } from "uuid";
@@ -79,6 +80,46 @@ export class UsersService {
             .sort((a, b) => b.xp - a.xp);
 
         return ranked;
+    }
+
+    /// Fixed daily mission set for V1 — both grounded in data that's
+    /// already tracked (no separate "missions" table needed yet).
+    /// Resets naturally every day since it's computed from today's date,
+    /// not stored/reset server-side.
+    async getDailyMissions(userId: number) {
+        const today = startOfUtcDay(new Date());
+
+        const reviewsToday = await this.prismaService.cardAnswer.count({
+            where: { user_id: userId, updated_at: { gte: today } },
+        });
+
+        const user = await this.prismaService.user.findUnique({
+            where: { id: userId },
+        });
+        const streakMaintainedToday =
+            !!user.last_study_date && isSameUtcDay(user.last_study_date, today);
+
+        const REVIEWS_TARGET = 20;
+
+        return {
+            date: today.toISOString().slice(0, 10),
+            missions: [
+                {
+                    id: "daily_reviews",
+                    title: `Complete ${REVIEWS_TARGET} reviews`,
+                    progress: Math.min(reviewsToday, REVIEWS_TARGET),
+                    target: REVIEWS_TARGET,
+                    completed: reviewsToday >= REVIEWS_TARGET,
+                },
+                {
+                    id: "maintain_streak",
+                    title: "Maintain your streak",
+                    progress: streakMaintainedToday ? 1 : 0,
+                    target: 1,
+                    completed: streakMaintainedToday,
+                },
+            ],
+        };
     }
     
 

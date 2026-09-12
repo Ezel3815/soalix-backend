@@ -14,6 +14,7 @@ import { BulkUpdateAnswersDto } from "src/dtos/cards/bulk-update-answers.dto";
 import { log } from "console";
 import { xpForAnswer } from "src/utils/level.utils";
 import { isSameUtcDay, isYesterday, startOfUtcDay } from "src/utils/date.utils";
+import { checkAndUnlockAchievements } from "src/utils/achievement.utils";
 
 @Injectable()
 export class DecksCardsService {
@@ -241,6 +242,7 @@ export class DecksCardsService {
         }
 
         await this.updateStreak(user.id);
+        await checkAndUnlockAchievements(this.prismaService, user.id);
     }
 
     /// Studying at all today (any review, first-time or repeat) counts

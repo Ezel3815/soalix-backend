@@ -96,6 +96,12 @@ export class UsersController {
         return await this.service.getFriendsLeaderboard(user.id);
     }
 
+    @DAuth()
+    @Get("me/missions")
+    async missions(@DUser() user: User) {
+        return await this.service.getDailyMissions(user.id);
+    }
+
     @DRole()
     @Get(":id")
     async readOne(@Param("id", ParseIntPipe) id: number) {

@@ -14,6 +14,7 @@ import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
 import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
 import { getLevelInfo } from "src/utils/level.utils";
 import { startOfUtcDay, isSameUtcDay } from "src/utils/date.utils";
+import { getAchievementsForUser } from "src/utils/achievement.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import { v7 as uuid } from "uuid";
@@ -120,6 +121,10 @@ export class UsersService {
                 },
             ],
         };
+    }
+
+    async getAchievements(userId: number) {
+        return await getAchievementsForUser(this.prismaService, userId);
     }
     
 

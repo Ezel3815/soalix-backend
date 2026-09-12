@@ -90,6 +90,12 @@ export class UsersController {
         return await this.service.searchUsers(q, user.id);
     }
 
+    @DAuth()
+    @Get("leaderboard")
+    async leaderboard(@DUser() user: User) {
+        return await this.service.getFriendsLeaderboard(user.id);
+    }
+
     @DRole()
     @Get(":id")
     async readOne(@Param("id", ParseIntPipe) id: number) {

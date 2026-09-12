@@ -1,6 +1,8 @@
 import { User } from "@prisma/client";
+import { getLevelInfo } from "src/utils/level.utils";
 
 export function UserOutDto(user: User) {
+    const levelInfo = getLevelInfo(user.xp);
     return {
         id: user.id,
         name: user.name,
@@ -15,6 +17,10 @@ export function UserOutDto(user: User) {
         avatar_glasses: user.avatar_glasses,
         current_streak: user.current_streak,
         created_at: user.created_at,
+        xp: levelInfo.xp,
+        level: levelInfo.level,
+        xp_into_level: levelInfo.xpIntoLevel,
+        xp_for_next_level: levelInfo.xpForNextLevel,
     };
 }
 

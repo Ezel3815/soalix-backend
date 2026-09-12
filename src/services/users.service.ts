@@ -12,6 +12,7 @@ import { UpdatePasswordDto } from "src/dtos/users/update-password.dto";
 import { UpdateUserDto } from "src/dtos/users/update-user.dto";
 import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
 import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
+import { getLevelInfo } from "src/utils/level.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import { v7 as uuid } from "uuid";
@@ -49,6 +50,35 @@ export class UsersService {
         });
 
         return users.map(UserOutDto);
+    }
+
+    /// Ranks the requesting user together with everyone they follow, by
+    /// total XP — the "friends leaderboard" for V2. Deliberately scoped
+    /// to follows only (not a global leaderboard) per product decision.
+    async getFriendsLeaderboard(userId: number) {
+        const follows = await this.prismaService.follow.findMany({
+            where: { followerId: userId },
+            select: { followingId: true },
+        });
+        const ids = [userId, ...follows.map((f) => f.followingId)];
+
+        const users = await this.prismaService.user.findMany({
+            where: { id: { in: ids } },
+        });
+
+        const ranked = users
+            .map((u) => ({
+                id: u.id,
+                name: u.name,
+                username: u.username,
+                avatar_hair: u.avatar_hair,
+                xp: u.xp,
+                level: getLevelInfo(u.xp).level,
+                isMe: u.id === userId,
+            }))
+            .sort((a, b) => b.xp - a.xp);
+
+        return ranked;
     }
     
 

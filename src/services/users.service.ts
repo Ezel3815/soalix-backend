@@ -126,6 +126,40 @@ export class UsersService {
     async getAchievements(userId: number) {
         return await getAchievementsForUser(this.prismaService, userId);
     }
+
+    /// Recent notable moments from people you follow — chapter
+    /// completions, level-ups, and achievement unlocks. This is what
+    /// creates the "I'm not studying alone" effect on the home screen.
+    /// Deliberately excludes your own events (that's what the
+    /// celebration popups on your own client are for).
+    async getFriendsActivityFeed(userId: number) {
+        const follows = await this.prismaService.follow.findMany({
+            where: { followerId: userId },
+            select: { followingId: true },
+        });
+        const followingIds = follows.map((f) => f.followingId);
+        if (followingIds.length === 0) return [];
+
+        const events = await this.prismaService.activityEvent.findMany({
+            where: { user_id: { in: followingIds } },
+            orderBy: { created_at: "desc" },
+            take: 20,
+            include: { user: true },
+        });
+
+        return events.map((e) => ({
+            id: e.id,
+            type: e.type,
+            title: e.title,
+            created_at: e.created_at,
+            user: {
+                id: e.user.id,
+                name: e.user.name,
+                username: e.user.username,
+                avatar_hair: e.user.avatar_hair,
+            },
+        }));
+    }
     
 
     async read(findQueryDto: FindQueryDto) {

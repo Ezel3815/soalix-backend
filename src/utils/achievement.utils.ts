@@ -82,7 +82,20 @@ export async function checkAndUnlockAchievements(
                 achievement_id,
             })),
         });
+
+        // Feed friends' achievement unlocks into the activity feed —
+        // reuses this exact moment rather than a separate tracking path.
+        const titleById = new Map(ACHIEVEMENTS.map((a) => [a.id, a.title]));
+        await prisma.activityEvent.createMany({
+            data: toUnlock.map((id) => ({
+                user_id: userId,
+                type: "achievement_unlocked",
+                title: titleById.get(id) ?? id,
+            })),
+        });
     }
+
+    return toUnlock;
 }
 
 export async function getAchievementsForUser(

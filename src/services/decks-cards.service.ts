@@ -12,7 +12,7 @@ import { BadRequestException, Inject, Injectable, forwardRef } from "@nestjs/com
 import { AnswerCardDto } from "src/dtos/cards/answer-card.dto";
 import { BulkUpdateAnswersDto } from "src/dtos/cards/bulk-update-answers.dto";
 import { log } from "console";
-import { xpForAnswer } from "src/utils/level.utils";
+import { xpForAnswer, getLevelInfo } from "src/utils/level.utils";
 import { isSameUtcDay, isYesterday, startOfUtcDay } from "src/utils/date.utils";
 import { checkAndUnlockAchievements } from "src/utils/achievement.utils";
 
@@ -229,6 +229,10 @@ export class DecksCardsService {
             update: { answer: answerCardDto.answer, updated_at: new Date() },
         });
 
+        const levelBefore = getLevelInfo(
+            (await this.prismaService.user.findUnique({ where: { id: user.id } })).xp,
+        ).level;
+
         // XP only on a genuinely new answer — re-reviewing a card you've
         // already answered shouldn't let XP be farmed repeatedly.
         if (!existing) {
@@ -241,22 +245,90 @@ export class DecksCardsService {
             }
         }
 
-        await this.updateStreak(user.id);
-        await checkAndUnlockAchievements(this.prismaService, user.id);
+        const userAfterXp = await this.prismaService.user.findUnique({
+            where: { id: user.id },
+        });
+        const levelAfter = getLevelInfo(userAfterXp.xp).level;
+        const leveledUp = levelAfter > levelBefore;
+
+        if (leveledUp) {
+            await this.prismaService.activityEvent.create({
+                data: {
+                    user_id: user.id,
+                    type: "level_up",
+                    title: `Reached Level ${levelAfter}`,
+                },
+            });
+        }
+
+        const streakResult = await this.updateStreak(user.id);
+
+        // Chapter-completion check — only worth checking when this
+        // answer was for a card that had never been answered before,
+        // since that's the only way a deck can newly become 100%.
+        let chapterCompleted = false;
+        let chapterTitle: string | null = null;
+        if (!existing) {
+            const card = await this.prismaService.card.findUnique({
+                where: { id: cardId },
+                include: { deck: true },
+            });
+            if (card) {
+                const totalCards = await this.prismaService.card.count({
+                    where: { deck_id: card.deck_id },
+                });
+                const answeredCards = await this.prismaService.cardAnswer.count({
+                    where: {
+                        user_id: user.id,
+                        card: { deck_id: card.deck_id },
+                    },
+                });
+                if (totalCards > 0 && answeredCards === totalCards) {
+                    chapterCompleted = true;
+                    chapterTitle = card.deck.title;
+                    await this.prismaService.activityEvent.create({
+                        data: {
+                            user_id: user.id,
+                            type: "chapter_completed",
+                            title: chapterTitle,
+                        },
+                    });
+                }
+            }
+        }
+
+        const newAchievements = await checkAndUnlockAchievements(
+            this.prismaService,
+            user.id,
+        );
+
+        return {
+            leveledUp,
+            newLevel: leveledUp ? levelAfter : undefined,
+            streakSaved: streakResult.saved,
+            newStreak: streakResult.saved ? streakResult.newStreak : undefined,
+            chapterCompleted,
+            chapterTitle: chapterCompleted ? chapterTitle : undefined,
+            newAchievements,
+        };
     }
 
     /// Studying at all today (any review, first-time or repeat) counts
     /// toward the streak. Consecutive calendar days increment it,
     /// missing a day resets it to 1, multiple reviews the same day are
-    /// a no-op (streak already counted for today).
-    private async updateStreak(userId: number) {
+    /// a no-op (streak already counted for today). Returns whether this
+    /// call was the one that "saved" today's streak, so the caller can
+    /// show a one-time celebration rather than on every card.
+    private async updateStreak(
+        userId: number,
+    ): Promise<{ saved: boolean; newStreak: number }> {
         const user = await this.prismaService.user.findUnique({
             where: { id: userId },
         });
         const today = startOfUtcDay(new Date());
 
         if (user.last_study_date && isSameUtcDay(user.last_study_date, today)) {
-            return;
+            return { saved: false, newStreak: user.current_streak };
         }
 
         const newStreak =
@@ -268,6 +340,8 @@ export class DecksCardsService {
             where: { id: userId },
             data: { current_streak: newStreak, last_study_date: today },
         });
+
+        return { saved: true, newStreak };
     }
 
     async bulkAnswer(user:User,  bulkUpdateAnswersDto: BulkUpdateAnswersDto) {

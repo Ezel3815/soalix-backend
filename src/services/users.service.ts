@@ -18,6 +18,7 @@ import { getAchievementsForUser } from "src/utils/achievement.utils";
 import { claimQuestChest, getQuestsForUser } from "src/utils/quests.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
+import { sendPushToFollowers, sendPushToUser } from "src/utils/push.utils";
 import { v7 as uuid } from "uuid";
 import * as md5 from "md5";
 
@@ -462,6 +463,19 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
         return out;
     }
 
+    /// Saves (or clears, when token is null) this device's push token.
+    /// Called on login and whenever Firebase hands the app a fresh
+    /// token. One token per user — a second device simply overwrites
+    /// the first, matching how the app currently has no multi-device
+    /// concept anywhere else.
+    async updateFcmToken(userId: number, token: string | null) {
+        await this.prismaService.user.update({
+            where: { id: userId },
+            data: { fcm_token: token },
+        });
+        return true;
+    }
+
     async follow(followerId: number, followingId: number) {
         if (followerId === followingId) {
             GenerateBadRequestException(["You can't follow yourself"]);
@@ -502,6 +516,29 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
                     title: "followed",
                 },
             });
+            // Outside-the-app notification, in addition to the Feed post
+            // above — this is the one the person sees even if they
+            // haven't opened Soalix.
+            const follower = await this.prismaService.user.findUnique({
+                where: { id: followerId },
+                select: { name: true },
+            });
+            await sendPushToUser(
+                this.prismaService,
+                followingId,
+                "متابع جديد",
+                `بدأ ${follower?.name ?? "شخص ما"} بمتابعتك`,
+                { type: "followed", userId: String(followerId) },
+            );
+            // Also let the follower's OWN followers know — mirrors the
+            // in-app "friends activity" feed, just delivered outside it.
+            await sendPushToFollowers(
+                this.prismaService,
+                followerId,
+                "نشاط صديق",
+                `${follower?.name ?? "صديقك"} بدأ بمتابعة ${targetUser?.name ?? "شخص جديد"}`,
+                { type: "friend_followed", userId: String(followerId) },
+            );
         }
 
         return true;

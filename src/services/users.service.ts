@@ -42,21 +42,58 @@ export class UsersService {
         return UserOutDto(user);
     }
 
-    async searchUsers(query: string, excludeUserId: number) {
-        if (!query || query.trim().length === 0) return [];
+    /// Finds people by name or username. People you already follow come
+    /// first, then names that START with what was typed, then the rest —
+    /// so a friend is never buried under (or cut off by) strangers who
+    /// merely contain the same letters. Emails are never sent to the app.
+    async searchUsers(query: string, requesterId: number) {
+        const q = (query ?? "").trim();
+        if (q.length === 0) return [];
 
-        const users = await this.prismaService.user.findMany({
-            where: {
-                id: { not: excludeUserId },
-                OR: [
-                    { username: { contains: query } },
-                    { name: { contains: query } },
-                ],
-            },
-            take: 20,
-        });
+        const [matches, follows] = await Promise.all([
+            this.prismaService.user.findMany({
+                where: {
+                    id: { not: requesterId },
+                    OR: [
+                        { username: { contains: q } },
+                        { name: { contains: q } },
+                    ],
+                },
+                take: 200,
+            }),
+            this.prismaService.follow.findMany({
+                where: { followerId: requesterId },
+                select: { followingId: true },
+            }),
+        ]);
 
-        return users.map(UserOutDto);
+        const followingIds = new Set(follows.map((f) => f.followingId));
+        const lower = q.toLowerCase();
+        const rank = (u: User) => {
+            const name = (u.name ?? "").toLowerCase();
+            const username = (u.username ?? "").toLowerCase();
+            const exact = name === lower || username === lower ? 0 : 1;
+            const prefix =
+                name.startsWith(lower) || username.startsWith(lower) ? 0 : 1;
+            const followed = followingIds.has(u.id) ? 0 : 1;
+            return [followed, exact, prefix];
+        };
+
+        return matches
+            .sort((a, b) => {
+                const ra = rank(a);
+                const rb = rank(b);
+                for (let i = 0; i < ra.length; i++) {
+                    if (ra[i] !== rb[i]) return ra[i] - rb[i];
+                }
+                return (a.name ?? "").localeCompare(b.name ?? "");
+            })
+            .slice(0, 20)
+            .map((u) => ({
+                ...UserOutDto(u),
+                email: "", // never expose other people's emails
+                isFollowing: followingIds.has(u.id),
+            }));
     }
 
     /// Ranks the requesting user together with everyone they follow, by
@@ -413,13 +450,16 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
             isFriend = !!reverseRecord;
         }
 
-        return UserProfileOutDto(
+        const out = UserProfileOutDto(
             user,
             followersCount,
             followingCount,
             isFollowing,
             isFriend,
         );
+        // Only you can see your own email.
+        if (targetUserId !== requestingUserId) out.email = "";
+        return out;
     }
 
     async follow(followerId: number, followingId: number) {

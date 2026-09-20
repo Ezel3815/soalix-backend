@@ -7,6 +7,7 @@ import { ResetPasswordDto } from "src/dtos/auth/reset-passwrod.dto";
 import { AuthService } from "src/services/auth.service";
 import { ApiTags } from "@nestjs/swagger";
 import { ResendActivationCodeDto } from "src/dtos/auth/resend-activation-code.dto";
+import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 
 @ApiTags("Auth")
 @Controller("auth")
@@ -18,14 +19,35 @@ export class AuthController {
         return this.service.isUsernameAvailable(username);
     }
 
+    // A race (two people taking the same username at once) would otherwise
+    // surface as a 500 from the DB unique constraint; return a clear 400.
+    private async handleUnique<T>(action: () => Promise<T>): Promise<T> {
+        try {
+            return await action();
+        } catch (e: any) {
+            if (e?.code === "P2002") {
+                const target = String(e?.meta?.target ?? "");
+                if (target.includes("username")) {
+                    GenerateBadRequestException(["Username already taken"]);
+                }
+                if (target.includes("email")) {
+                    GenerateBadRequestException(["Email already exists"]);
+                }
+            }
+            throw e;
+        }
+    }
+
     @Post("register")
     register(@Body() registerDto: RegisterDto) {
-        return this.service.regiser(registerDto);
+        return this.handleUnique(() => this.service.regiser(registerDto));
     }
 
     @Post("register-without-code")
     registerWithoutCode(@Body() registerDto: RegisterDto) {
-        return this.service.regiserWithOutCode(registerDto);
+        return this.handleUnique(() =>
+            this.service.regiserWithOutCode(registerDto),
+        );
     }
 
     @Post("login")

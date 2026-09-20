@@ -90,10 +90,18 @@ export function DeckRecursiveOutDto(
                 deck.children.length == 0) ||
             (deck.type == DeckType.CARDS_DECK && deck.cards.length == 0));
 
-    // Sequential unlock only enforced between chapters (depth === 1).
+    // A "chapter" is a card deck among sibling card decks (the lesson road),
+    // wherever it sits in the tree. Sequential unlock applies only there —
+    // NOT to subjects/years, or every subject after the first would be
+    // hidden until the previous one was fully finished.
+    const isChapter =
+        deck.type == DeckType.CARDS_DECK &&
+        siblings.length > 0 &&
+        siblings.every((s) => s.type == DeckType.CARDS_DECK);
+
     // A chapter unlocks once the previous chapter is fully completed.
     let sequentialLocked = false;
-    if (user.role != UserRole.ADMIN && depth === 1 && index > 0) {
+    if (user.role != UserRole.ADMIN && isChapter && index > 0) {
         const previousSibling = siblings[index - 1];
         sequentialLocked = !isDeckCompleted(previousSibling);
     }
@@ -107,7 +115,7 @@ export function DeckRecursiveOutDto(
 
     // The single chapter the home-screen road should highlight as
     // "in progress" - the first unlocked-but-not-finished chapter.
-    const current = depth === 1 && !isLocked && !completed;
+    const current = isChapter && !isLocked && !completed;
 
     const answerCounts = countAnswers(deck.cards);
 

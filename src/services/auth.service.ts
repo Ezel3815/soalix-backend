@@ -27,6 +27,13 @@ export class AuthService {
         private emailSerivce: EmailService,
     ) {}
 
+    private async assertUsernameFree(username: string) {
+        const taken = await this.prismaService.user.findUnique({
+            where: { username },
+        });
+        if (taken) GenerateBadRequestException(["Username already taken"]);
+    }
+
     async regiser(registerDto: RegisterDto) {
         const alreadyExisted = await this.prismaService.user.findUnique({
             where: { email: registerDto.email },
@@ -42,11 +49,15 @@ export class AuthService {
             });
         }
 
+        const username = registerDto.username.trim().toLowerCase();
+        await this.assertUsernameFree(username);
+
         const activation_code = generateRandomCode(6);
 
         const user = await this.prismaService.user.create({
             data: {
                 ...registerDto,
+                username,
                 password: md5(registerDto.password),
                 activation_code,
                 status: UserStatus.ACTIVE,
@@ -75,10 +86,14 @@ export class AuthService {
             GenerateBadRequestException(["Already Existed User"]);
         }
 
+        const username = registerDto.username.trim().toLowerCase();
+        await this.assertUsernameFree(username);
+
         const user = await this.prismaService.user.create({
             data: {
                 email: registerDto.email,
                 name: registerDto.name,
+                username,
                 password: md5(registerDto.password),
                 status: UserStatus.ACTIVE,
             },

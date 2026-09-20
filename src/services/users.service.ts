@@ -135,7 +135,11 @@ export class UsersService {
             where: { id: eventId },
         });
         if (!event) GenerateBadRequestException(["Post not found"]);
-        if (event.user_id !== userId) {
+        if (event.type === "followed") {
+            // "X followed you" is only visible to the person followed.
+            if (event.target_user_id !== userId)
+                GenerateBadRequestException(["Post not found"]);
+        } else if (event.user_id !== userId) {
             const follows = await this.prismaService.follow.findFirst({
                 where: { followerId: userId, followingId: event.user_id },
             });
@@ -152,7 +156,15 @@ export class UsersService {
         const ids = [userId, ...follows.map((f) => f.followingId)];
 
         const events = await this.prismaService.activityEvent.findMany({
-            where: { user_id: { in: ids } },
+            where: {
+                OR: [
+                    // own + followed users' activity (follow events excluded:
+                    // they are private notifications, see below)
+                    { user_id: { in: ids }, type: { not: "followed" } },
+                    // "X followed you" — only for the person followed
+                    { type: "followed", target_user_id: userId },
+                ],
+            },
             orderBy: { created_at: "desc" },
             take: 40,
             include: {
@@ -182,6 +194,8 @@ export class UsersService {
 
     async toggleCelebrate(userId: number, eventId: number) {
         const event = await this.assertFeedEventVisible(userId, eventId);
+        if (event.type === "followed")
+            GenerateBadRequestException(["You can't celebrate this post"]);
         if (event.user_id === userId)
             GenerateBadRequestException(["You can't celebrate your own post"]);
 
@@ -231,7 +245,9 @@ export class UsersService {
     }
 
     async addFeedComment(userId: number, eventId: number, text: string) {
-        await this.assertFeedEventVisible(userId, eventId);
+        const target = await this.assertFeedEventVisible(userId, eventId);
+        if (target.type === "followed")
+            GenerateBadRequestException(["You can't comment on this post"]);
         const clean = String(text ?? "").trim();
         if (clean.length < 1 || clean.length > 300)
             GenerateBadRequestException(["Comment must be 1-300 characters"]);
@@ -278,7 +294,7 @@ export class UsersService {
         if (followingIds.length === 0) return [];
 
         const events = await this.prismaService.activityEvent.findMany({
-            where: { user_id: { in: followingIds } },
+            where: { user_id: { in: followingIds }, type: { not: "followed" } },
             orderBy: { created_at: "desc" },
             take: 20,
             include: { user: true },
@@ -418,7 +434,74 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
             data: { followerId, followingId },
         });
 
+        // Notify the followed person in their Feed ("X followed you"). At
+        // most one per pair per 24h so follow/unfollow spam can't flood it.
+        const recent = await this.prismaService.activityEvent.findFirst({
+            where: {
+                user_id: followerId,
+                target_user_id: followingId,
+                type: "followed",
+                created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            },
+        });
+        if (!recent) {
+            await this.prismaService.activityEvent.create({
+                data: {
+                    user_id: followerId,
+                    target_user_id: followingId,
+                    type: "followed",
+                    title: "followed",
+                },
+            });
+        }
+
         return true;
+    }
+
+    /** People who follow `targetId` ("followers") or whom they follow ("following"). */
+    async getFollowList(
+        kind: "followers" | "following",
+        targetId: number,
+        viewerId: number,
+    ) {
+        const target = await this.prismaService.user.findUnique({
+            where: { id: targetId },
+            select: { id: true },
+        });
+        if (!target) GenerateBadRequestException(["User does not exist"]);
+
+        const rows = await this.prismaService.follow.findMany({
+            where:
+                kind === "followers"
+                    ? { followingId: targetId }
+                    : { followerId: targetId },
+            orderBy: { created_at: "desc" },
+            take: 200,
+            include: { follower: true, following: true },
+        });
+        const people = rows.map((r) => ({
+            user: kind === "followers" ? r.follower : r.following,
+            since: r.created_at,
+        }));
+
+        const iFollow = await this.prismaService.follow.findMany({
+            where: {
+                followerId: viewerId,
+                followingId: { in: people.map((p) => p.user.id) },
+            },
+            select: { followingId: true },
+        });
+        const iFollowSet = new Set(iFollow.map((f) => f.followingId));
+
+        return people.map((p) => ({
+            id: p.user.id,
+            name: p.user.name,
+            username: p.user.username,
+            avatar_hair: p.user.avatar_hair,
+            since: p.since,
+            is_me: p.user.id === viewerId,
+            is_following: iFollowSet.has(p.user.id),
+        }));
     }
 
     async unfollow(followerId: number, followingId: number) {

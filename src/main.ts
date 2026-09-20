@@ -5,6 +5,29 @@ import { ValidationPipe } from "@nestjs/common";
 import { join } from "path";
 import { AllExceptionsFilter } from "./filter/all-exceptions.filter";
 
+// FIX: on a free-tier host, Prisma's default pool size (2x CPU cores + 1)
+// can exceed what the free-tier database plan actually allows, and every
+// slot that fills up waits up to Prisma's default 10s before failing with
+// "Timed out fetching a new connection from the connection pool" — which
+// the app then shows as a generic "Something went wrong".
+//
+// This sets a small, safe pool size and a longer queue timeout directly in
+// code, so it's guaranteed even if the DATABASE_URL environment variable on
+// the host is never touched. It only fills in params that aren't already
+// present, so setting them explicitly in the Render env var (or bumping
+// them there later, e.g. after upgrading the database plan) still wins.
+function applyDatabasePoolDefaults() {
+    const url = process.env.DATABASE_URL;
+    if (!url) return;
+
+    const [base, query = ""] = url.split("?");
+    const params = new URLSearchParams(query);
+    if (!params.has("connection_limit")) params.set("connection_limit", "3");
+    if (!params.has("pool_timeout")) params.set("pool_timeout", "20");
+    process.env.DATABASE_URL = `${base}?${params.toString()}`;
+}
+applyDatabasePoolDefaults();
+
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 

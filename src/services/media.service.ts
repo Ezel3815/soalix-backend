@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { MediaType, User } from "@prisma/client";
+import { Injectable, Logger } from "@nestjs/common";
+import { MediaType, User, Prisma } from "@prisma/client";
 import { PrismaService } from "nestjs-prisma";
 import { DocumentOutDto } from "src/dtos/decks/document.out-dto";
 import {
@@ -9,6 +9,7 @@ import {
 } from "src/utils/files.utils";
 @Injectable()
 export class MediaService {
+    private readonly logger = new Logger(MediaService.name);
     constructor(private prismaService: PrismaService) {}
     async create(file: Express.Multer.File, type: MediaType) {
         const originalName = GetRandomNameForFile(file);
@@ -17,9 +18,37 @@ export class MediaService {
             data: { name: url, type },
         });
     }
-    async delete(name) {
-        await DeleteFile(name);
-        return await this.prismaService.media.delete({ where: { name } });
+    // FIX: deleting a card used to crash the whole request whenever one of
+    // its images was already gone — either the Media row was missing (a
+    // stale/orphaned front_image_name/back_image_name left over from the
+    // old host migration) or the Cloudinary call failed (e.g. missing/bad
+    // credentials). Either error used to bubble straight up as an
+    // unhandled 500 ("Something went wrong"), and the card never got
+    // deleted. Now each failure is logged and swallowed here, so a broken
+    // image reference never blocks deleting the card itself.
+    async delete(name: string) {
+        try {
+            await DeleteFile(name);
+        } catch (err) {
+            this.logger.warn(
+                `Could not delete remote file "${name}" (continuing): ${err?.message ?? err}`,
+            );
+        }
+        try {
+            return await this.prismaService.media.delete({ where: { name } });
+        } catch (err) {
+            if (
+                err instanceof Prisma.PrismaClientKnownRequestError &&
+                err.code === "P2025"
+            ) {
+                // Row already gone (orphaned reference) — nothing to do.
+                this.logger.warn(
+                    `Media row "${name}" was already missing — skipping.`,
+                );
+                return null;
+            }
+            throw err;
+        }
     }
     async deleteAllUnlinked() {
         const expiredDate = new Date();
@@ -43,9 +72,18 @@ export class MediaService {
         const card = await this.prismaService.card.findUnique({
             where: { id: cardId },
         });
-        if (card.back_image_name) await this.delete(card.back_image_name);
-        if (card.front_image_name) await this.delete(card.front_image_name);
-        if (card.document_name) await this.delete(card.document_name);
+        // Card already gone (e.g. deleted concurrently) — nothing to clean up.
+        if (!card) return;
+
+        // Dedupe in case front/back/document accidentally point at the same
+        // media name — deleting the same row twice would otherwise throw.
+        const names = new Set(
+            [card.back_image_name, card.front_image_name, card.document_name]
+                .filter(Boolean),
+        );
+        for (const name of names) {
+            await this.delete(name);
+        }
     }
     async readDocuments(user: User) {
         const documents = await this.prismaService.media.findMany({

@@ -101,7 +101,11 @@ export class UsersService {
         const streakMaintainedToday =
             !!user.last_study_date && isSameUtcDay(user.last_study_date, today);
 
-        const REVIEWS_TARGET = 20;
+        // BUG #8: this used to say 20 while the new daily quests (in
+        // quests.utils.ts) target 10 for the exact same underlying count
+        // (today's CardAnswer rows) — same UI showing two different
+        // targets for the same fact. Aligned to 10 to match.
+        const REVIEWS_TARGET = 10;
 
         return {
             date: today.toISOString().slice(0, 10),
@@ -249,7 +253,11 @@ export class UsersService {
             chestId,
         );
         if (!result.ok) GenerateBadRequestException([result.message]);
-        return { xp: result.xp };
+        // Surface leveledUp/newLevel same as DecksCardsService.answer() does,
+        // so the client can show the same level-up celebration either way —
+        // the level_up activity event itself was already being created
+        // correctly inside claimQuestChest regardless of this.
+        return { xp: result.xp, leveledUp: result.leveledUp, newLevel: result.newLevel };
     }
 
     async getAchievements(userId: number) {

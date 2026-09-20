@@ -122,6 +122,40 @@ export class UsersController {
     }
 
     @DAuth()
+    @Get("me/feed")
+    async feed(@DUser() user: User) {
+        return await this.service.getFeed(user.id);
+    }
+
+    @DAuth()
+    @Post("feed/:eventId/celebrate")
+    async celebrate(
+        @DUser() user: User,
+        @Param("eventId", ParseIntPipe) eventId: number,
+    ) {
+        return await this.service.toggleCelebrate(user.id, eventId);
+    }
+
+    @DAuth()
+    @Get("feed/:eventId/comments")
+    async feedComments(
+        @DUser() user: User,
+        @Param("eventId", ParseIntPipe) eventId: number,
+    ) {
+        return await this.service.getFeedComments(user.id, eventId);
+    }
+
+    @DAuth()
+    @Post("feed/:eventId/comments")
+    async addFeedComment(
+        @DUser() user: User,
+        @Param("eventId", ParseIntPipe) eventId: number,
+        @Body("text") text: string,
+    ) {
+        return await this.service.addFeedComment(user.id, eventId, text);
+    }
+
+    @DAuth()
     @Get("me/quests")
     async quests(@DUser() user: User) {
         return await this.service.getQuests(user.id);

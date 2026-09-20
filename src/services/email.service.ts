@@ -3,7 +3,11 @@ import { User } from "@prisma/client";
 
 @Injectable()
 export class EmailService {
-    private async send(to: string, subject: string, text: string) {
+    private async send(
+        to: string,
+        subject: string,
+        text: string,
+    ): Promise<boolean> {
         try {
             const response = await fetch("https://api.resend.com/emails", {
                 method: "POST",
@@ -20,14 +24,17 @@ export class EmailService {
             });
             if (!response.ok) {
                 console.error("Error sending email", await response.text());
+                return false;
             }
+            return true;
         } catch (e) {
             console.error("Error sending email", e);
+            return false;
         }
     }
 
     async sendVerificationEmail(user: User) {
-        await this.send(
+        return await this.send(
             user.email,
             "Verification code",
             `Hello ${user.name} Your verification code is ${user.activation_code}`,
@@ -35,7 +42,7 @@ export class EmailService {
     }
 
     async sendResetPasswordEmail(user: User) {
-        await this.send(
+        return await this.send(
             user.email,
             "Verification code",
             `Hello ${user.name} Your reset password code is ${user.reset_password_code}`,

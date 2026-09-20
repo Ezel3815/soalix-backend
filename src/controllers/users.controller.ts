@@ -1,9 +1,9 @@
-
 import {
     Body,
     Controller,
     Delete,
     Get,
+    Header,
     Param,
     ParseIntPipe,
     Post,
@@ -101,6 +101,18 @@ export class UsersController {
     @Get("me/missions")
     async missions(@DUser() user: User) {
         return await this.service.getDailyMissions(user.id);
+    }
+
+    @DAuth()
+    @Get("me/activity-feed")
+    async activityFeed(@DUser() user: User) {
+        return await this.service.getFriendsActivityFeed(user.id);
+    }
+
+    @Header("Content-Type", "text/html; charset=utf-8")
+    @Get("share/:username")
+    async sharePage(@Param("username") username: string) {
+        return await this.service.getPublicProfileHtml(username);
     }
 
     @DAuth()

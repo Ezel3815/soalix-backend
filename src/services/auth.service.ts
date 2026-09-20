@@ -27,6 +27,13 @@ export class AuthService {
         private emailSerivce: EmailService,
     ) {}
 
+    async isUsernameAvailable(username: string) {
+        const taken = await this.prismaService.user.findUnique({
+            where: { username: username.trim().toLowerCase() },
+        });
+        return { available: !taken };
+    }
+
     private async assertUsernameFree(username: string) {
         const taken = await this.prismaService.user.findUnique({
             where: { username },

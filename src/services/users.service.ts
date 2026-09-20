@@ -15,6 +15,7 @@ import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
 import { getLevelInfo } from "src/utils/level.utils";
 import { startOfUtcDay, isSameUtcDay } from "src/utils/date.utils";
 import { getAchievementsForUser } from "src/utils/achievement.utils";
+import { claimQuestChest, getQuestsForUser } from "src/utils/quests.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import { v7 as uuid } from "uuid";
@@ -121,6 +122,20 @@ export class UsersService {
                 },
             ],
         };
+    }
+
+    async getQuests(userId: number) {
+        return await getQuestsForUser(this.prismaService, userId);
+    }
+
+    async claimQuestChest(userId: number, chestId: string) {
+        const result = await claimQuestChest(
+            this.prismaService,
+            userId,
+            chestId,
+        );
+        if (!result.ok) GenerateBadRequestException([result.message]);
+        return { xp: result.xp };
     }
 
     async getAchievements(userId: number) {

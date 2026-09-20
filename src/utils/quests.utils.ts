@@ -279,13 +279,22 @@ export async function claimQuestChest(
             if (levelAfter > levelBefore) {
                 leveledUp = true;
                 newLevel = levelAfter;
-                await tx.activityEvent.create({
-                    data: {
+                const alreadyPosted = await tx.activityEvent.findFirst({
+                    where: {
                         user_id: userId,
                         type: "level_up",
                         title: `Reached Level ${levelAfter}`,
                     },
                 });
+                if (!alreadyPosted) {
+                    await tx.activityEvent.create({
+                        data: {
+                            user_id: userId,
+                            type: "level_up",
+                            title: `Reached Level ${levelAfter}`,
+                        },
+                    });
+                }
             }
         });
     } catch (e: any) {

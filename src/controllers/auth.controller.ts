@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { ActivateUserDto } from "src/dtos/auth/activate-user.dto";
 import { LoginDto } from "src/dtos/auth/login.dto";
 import { RegisterDto } from "src/dtos/auth/register.dto";
@@ -12,6 +12,11 @@ import { ResendActivationCodeDto } from "src/dtos/auth/resend-activation-code.dt
 @Controller("auth")
 export class AuthController {
     constructor(private service: AuthService) {}
+
+    @Get("username-available/:username")
+    usernameAvailable(@Param("username") username: string) {
+        return this.service.isUsernameAvailable(username);
+    }
 
     @Post("register")
     register(@Body() registerDto: RegisterDto) {

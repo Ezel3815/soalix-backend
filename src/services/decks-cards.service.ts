@@ -292,13 +292,27 @@ export class DecksCardsService {
         const leveledUp = levelAfter > levelBefore;
 
         if (leveledUp) {
-            await this.prismaService.activityEvent.create({
-                data: {
+            // FIX: answering several cards in quick succession fires
+            // overlapping requests, each of which could independently see
+            // "I just crossed a level boundary" and write its own duplicate
+            // event — this is what produced repeated identical posts in the
+            // feed. Skip if today's post for this exact level already exists.
+            const alreadyPosted = await this.prismaService.activityEvent.findFirst({
+                where: {
                     user_id: user.id,
                     type: "level_up",
                     title: `Reached Level ${levelAfter}`,
                 },
             });
+            if (!alreadyPosted) {
+                await this.prismaService.activityEvent.create({
+                    data: {
+                        user_id: user.id,
+                        type: "level_up",
+                        title: `Reached Level ${levelAfter}`,
+                    },
+                });
+            }
         }
 
         const streakResult = await this.updateStreak(user.id);

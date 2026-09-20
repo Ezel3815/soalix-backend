@@ -13,7 +13,10 @@ COPY . .
 
 RUN npx prisma generate
 
-# Apply any pending database migrations, then start the app.
-# This makes schema changes deploy automatically from now on — no
-# manual migration step needed on future updates.
-ENTRYPOINT ["sh", "-c", "npx prisma migrate deploy && npm start"]
+# Sync the database to prisma/schema.prisma, then start the app.
+# Earlier deploys never ran migrations, so the DB may have no migration
+# history and `migrate deploy` could block every deploy. `db push` adds what
+# is missing (xp column, UserAchievement, ActivityEvent) and refuses
+# destructive changes; if it can't run, the server still starts and the
+# reason is in the logs.
+ENTRYPOINT ["sh", "-c", "npx prisma db push --skip-generate || echo 'WARNING: prisma db push failed - starting anyway'; npm start"]

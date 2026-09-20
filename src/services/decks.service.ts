@@ -51,7 +51,13 @@ export class DecksService {
         extraDeckFilters?: Prisma.DeckWhereInput,
     ) {
         if (user?.role != UserRole.ADMIN) {
-            const userDeck = this.prismaService.userDeck.findFirst({
+            // CRITICAL: this findFirst was never awaited, so `userDeck` was
+            // always a pending Promise — never falsy — meaning this check
+            // silently passed for EVERY user on EVERY deck, regardless of
+            // actual ownership. This is the real root cause of "answered a
+            // card in another user's private deck" (BUG #1) and affected
+            // every caller of checkOwnership, not just card answers.
+            const userDeck = await this.prismaService.userDeck.findFirst({
                 where: {
                     user_id: user.id,
                     deck_id: deckId,
@@ -326,7 +332,10 @@ async readHierarchy1(user: User, parentId: number | null) {
     }
 
     async unlink(user: User, id: number) {
-        if (!this.checkOwnership(user, id, { editable: true }))
+        // Same class of bug as inside checkOwnership itself: calling an
+        // async function without awaiting it means you're negating a
+        // Promise, which is never falsy, so this check never fired.
+        if (!(await this.checkOwnership(user, id, { editable: true })))
             GenerateBadRequestException([
                 "You can't delete a deck that you don't own",
             ]);
@@ -343,7 +352,8 @@ async readHierarchy1(user: User, parentId: number | null) {
     }
 
     async getShareCode(user: User, id: number, shareDeckDto: ShareDeckDto) {
-        if (!this.checkOwnership(user, id, { sharable: true }))
+        // Same missing-await bug as unlink() above.
+        if (!(await this.checkOwnership(user, id, { sharable: true })))
             GenerateBadRequestException(["You can't share this deck"]);
 
         const code = generateRandomCode(6);

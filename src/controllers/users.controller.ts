@@ -68,6 +68,24 @@ export class UsersController {
     }
 
     @DAuth()
+    @Get(":id/followers")
+    async followers(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.getFollowList("followers", id, user.id);
+    }
+
+    @DAuth()
+    @Get(":id/following")
+    async following(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.getFollowList("following", id, user.id);
+    }
+
+    @DAuth()
     @Post(":id/follow")
     async follow(
         @DUser() user: User,

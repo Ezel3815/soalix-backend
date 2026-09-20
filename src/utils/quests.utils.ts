@@ -1,13 +1,15 @@
 import { AnswerType } from "@prisma/client";
 import { PrismaService } from "nestjs-prisma";
 import { startOfUtcDay } from "./date.utils";
+import { getLevelInfo } from "./level.utils";
 
 /**
  * Quests (monthly / friends / daily) are computed from data that is already
  * tracked (CardAnswer.updated_at, ActivityEvent, Follow) — no new tables and
  * no migration. The only thing stored is "chest claimed", kept as a
  * `claim:<chest>:<period>` row in UserAchievement (unique per user, so a
- * chest can never be claimed twice).
+ * chest can never be claimed twice), plus a `mastery:<cardId>:<day>` row
+ * per card the first time it's mastered that day (see recordCardMasteryIfNew).
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -27,8 +29,11 @@ export const DAILY_QUESTS = [
 
 export const FRIENDS_TARGET = 50;
 export const FRIENDS_XP = 100;
+// BUG #3: without a personal floor, a partner who contributes 0 could still
+// claim the chest off someone else's work. Require a minimum of your own.
+export const FRIENDS_MIN_CONTRIBUTION = 10;
 
-const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+export const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 const monthKey = (d: Date) => d.toISOString().slice(0, 7);
 
 function periodBounds(now: Date) {
@@ -79,6 +84,28 @@ async function findPartnerId(prisma: PrismaService, userId: number) {
     return ids.find((id) => mutualSet.has(id)) ?? null;
 }
 
+/**
+ * BUG #4 fix: called from DecksCardsService.answer() whenever a card ends up
+ * EASY/GOOD. Writes a one-time-per-card-per-day row instead of relying on
+ * the card's *current* answer, so re-answering a card worse later the same
+ * day can no longer make mastery progress go down.
+ */
+export async function recordCardMasteryIfNew(
+    prisma: PrismaService,
+    userId: number,
+    cardId: number,
+): Promise<void> {
+    const key = `mastery:${cardId}:${dayKey(startOfUtcDay(new Date()))}`;
+    try {
+        await prisma.userAchievement.create({
+            data: { user_id: userId, achievement_id: key },
+        });
+    } catch (e: any) {
+        // Unique constraint => already recorded today for this card, ignore.
+        if (e?.code !== "P2002") throw e;
+    }
+}
+
 export async function getQuestsForUser(prisma: PrismaService, userId: number) {
     const now = new Date();
     const b = periodBounds(now);
@@ -101,8 +128,13 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
         await Promise.all([
             countSince(userId, b.monthStart),
             countSince(userId, b.today),
-            countSince(userId, b.today, {
-                answer: { in: [AnswerType.EASY, AnswerType.GOOD] },
+            // BUG #4: count durable mastery records, not the card's live state.
+            prisma.userAchievement.count({
+                where: {
+                    user_id: userId,
+                    achievement_id: { startsWith: "mastery:" },
+                    created_at: { gte: b.today },
+                },
             }),
             prisma.activityEvent.count({
                 where: {
@@ -160,7 +192,11 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
             chest: {
                 id: "friends",
                 xp: FRIENDS_XP,
-                reached: partner !== null && friendsTotal >= FRIENDS_TARGET,
+                // BUG #3: require your own minimum contribution, not just the combined total.
+                reached:
+                    partner !== null &&
+                    friendsTotal >= FRIENDS_TARGET &&
+                    myWeek >= FRIENDS_MIN_CONTRIBUTION,
                 claimed: isClaimed("friends"),
             },
         },
@@ -192,7 +228,7 @@ export async function claimQuestChest(
     prisma: PrismaService,
     userId: number,
     chestId: string,
-): Promise<{ ok: boolean; message?: string; xp?: number }> {
+): Promise<{ ok: boolean; message?: string; xp?: number; leveledUp?: boolean; newLevel?: number }> {
     const quests = await getQuestsForUser(prisma, userId);
     const chest =
         quests.monthly.chests.find((c) => c.id === chestId) ??
@@ -210,24 +246,46 @@ export async function claimQuestChest(
     if (!chest.reached) return { ok: false, message: "Chest is not ready yet" };
     if (chest.claimed) return { ok: false, message: "Chest already opened" };
 
+    let leveledUp = false;
+    let newLevel: number | undefined;
+
     try {
-        await prisma.$transaction([
-            prisma.userAchievement.create({
+        await prisma.$transaction(async (tx) => {
+            await tx.userAchievement.create({
                 data: {
                     user_id: userId,
                     achievement_id: claimKey(chestId, new Date()),
                 },
-            }),
-            prisma.user.update({
+            });
+
+            const before = await tx.user.findUnique({ where: { id: userId } });
+            const levelBefore = getLevelInfo(before.xp).level;
+
+            const after = await tx.user.update({
                 where: { id: userId },
                 data: { xp: { increment: chest.xp } },
-            }),
-        ]);
+            });
+            const levelAfter = getLevelInfo(after.xp).level;
+
+            // BUG #7: claiming a chest could cross a level boundary with no
+            // level-up event, unlike answering a card.
+            if (levelAfter > levelBefore) {
+                leveledUp = true;
+                newLevel = levelAfter;
+                await tx.activityEvent.create({
+                    data: {
+                        user_id: userId,
+                        type: "level_up",
+                        title: `Reached Level ${levelAfter}`,
+                    },
+                });
+            }
+        });
     } catch (e: any) {
         // Unique key hit => already claimed in a parallel request.
         if (e?.code === "P2002")
             return { ok: false, message: "Chest already opened" };
         throw e;
     }
-    return { ok: true, xp: chest.xp };
+    return { ok: true, xp: chest.xp, leveledUp, newLevel };
 }

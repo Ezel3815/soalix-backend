@@ -124,6 +124,120 @@ export class UsersService {
         };
     }
 
+    // ───────────── Feed (own + followed users' activity) ─────────────
+
+    private async assertFeedEventVisible(userId: number, eventId: number) {
+        const event = await this.prismaService.activityEvent.findUnique({
+            where: { id: eventId },
+        });
+        if (!event) GenerateBadRequestException(["Post not found"]);
+        if (event.user_id !== userId) {
+            const follows = await this.prismaService.follow.findFirst({
+                where: { followerId: userId, followingId: event.user_id },
+            });
+            if (!follows) GenerateBadRequestException(["Post not found"]);
+        }
+        return event;
+    }
+
+    async getFeed(userId: number) {
+        const follows = await this.prismaService.follow.findMany({
+            where: { followerId: userId },
+            select: { followingId: true },
+        });
+        const ids = [userId, ...follows.map((f) => f.followingId)];
+
+        const events = await this.prismaService.activityEvent.findMany({
+            where: { user_id: { in: ids } },
+            orderBy: { created_at: "desc" },
+            take: 40,
+            include: {
+                user: true,
+                _count: { select: { reactions: true, comments: true } },
+                reactions: { where: { user_id: userId }, select: { user_id: true } },
+            },
+        });
+
+        return events.map((e) => ({
+            id: e.id,
+            type: e.type,
+            title: e.title,
+            created_at: e.created_at,
+            mine: e.user_id === userId,
+            celebrations: e._count.reactions,
+            comments: e._count.comments,
+            celebrated: e.reactions.length > 0,
+            user: {
+                id: e.user.id,
+                name: e.user.name,
+                username: e.user.username,
+                avatar_hair: e.user.avatar_hair,
+            },
+        }));
+    }
+
+    async toggleCelebrate(userId: number, eventId: number) {
+        const event = await this.assertFeedEventVisible(userId, eventId);
+        if (event.user_id === userId)
+            GenerateBadRequestException(["You can't celebrate your own post"]);
+
+        const key = { event_id: eventId, user_id: userId };
+        const existing = await this.prismaService.activityReaction.findUnique({
+            where: { event_id_user_id: key },
+        });
+        if (existing) {
+            await this.prismaService.activityReaction.delete({
+                where: { event_id_user_id: key },
+            });
+        } else {
+            try {
+                await this.prismaService.activityReaction.create({ data: key });
+            } catch (e: any) {
+                if (e?.code !== "P2002") throw e; // double tap race: already there
+            }
+        }
+        const count = await this.prismaService.activityReaction.count({
+            where: { event_id: eventId },
+        });
+        return { celebrated: !existing, count };
+    }
+
+    private feedCommentOut(c: any) {
+        return {
+            id: c.id,
+            text: c.text,
+            created_at: c.created_at,
+            user: {
+                id: c.user.id,
+                name: c.user.name,
+                avatar_hair: c.user.avatar_hair,
+            },
+        };
+    }
+
+    async getFeedComments(userId: number, eventId: number) {
+        await this.assertFeedEventVisible(userId, eventId);
+        const rows = await this.prismaService.activityComment.findMany({
+            where: { event_id: eventId },
+            orderBy: { created_at: "asc" },
+            take: 100,
+            include: { user: true },
+        });
+        return rows.map((c) => this.feedCommentOut(c));
+    }
+
+    async addFeedComment(userId: number, eventId: number, text: string) {
+        await this.assertFeedEventVisible(userId, eventId);
+        const clean = String(text ?? "").trim();
+        if (clean.length < 1 || clean.length > 300)
+            GenerateBadRequestException(["Comment must be 1-300 characters"]);
+        const row = await this.prismaService.activityComment.create({
+            data: { event_id: eventId, user_id: userId, text: clean },
+            include: { user: true },
+        });
+        return this.feedCommentOut(row);
+    }
+
     async getQuests(userId: number) {
         return await getQuestsForUser(this.prismaService, userId);
     }

@@ -113,6 +113,15 @@ export function DeckRecursiveOutDto(
 
     return {
         ...deckWithoutCards,
+        // Slim card list (id + the user's answer) so clients can compute
+        // progress; full card data is fetched per deck via /cards/:deckId.
+        cards: cards.map((c) => ({
+            id: c.id,
+            deck_id: c.deck_id,
+            order: c.order,
+            type: c.type,
+            answer: c.answers?.[0]?.answer ?? "NONE",
+        })),
         editable: user.role == UserRole.ADMIN,
         sharable: false,
         easyGoodCount: answerCounts.easyGoodCount,

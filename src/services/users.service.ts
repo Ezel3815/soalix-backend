@@ -186,6 +186,23 @@ export class UsersService {
         return UserOutDto(user);
     }
 
+    async getPublicProfileHtml(username: string) {
+        const esc = (s: string) =>
+            s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+        const user = await this.prismaService.user.findUnique({
+            where: { username: username.toLowerCase() },
+        });
+        if (!user) GenerateBadRequestException(["User does not exist"]);
+        const info = UserOutDto(user);
+        return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(user.name)} - MOZAIK</title>
+<style>body{font-family:sans-serif;background:#f1f3e6;color:#1e2b22;text-align:center;padding:48px 20px}
+.card{max-width:360px;margin:auto;background:#fff;border-radius:24px;padding:32px;box-shadow:0 4px 16px #0001}
+b{color:#4f9d69}</style></head><body><div class="card"><h2>${esc(user.name)}</h2>
+<p>@${esc(user.username ?? "")}</p><p>المستوى <b>${info.level}</b> · سلسلة <b>${info.current_streak}</b></p>
+<p>ابحث عن <b>@${esc(user.username ?? "")}</b> داخل تطبيق MOZAIK لمتابعته.</p></div></body></html>`;
+    }
+
     async getProfile(targetUserId: number, requestingUserId: number) {
         const user = await this.prismaService.user.findUnique({
             where: { id: targetUserId },
@@ -264,6 +281,9 @@ export class UsersService {
 
     async updateProfile(userId: number, updateProfileDto: UpdateProfileDto) {
         if (updateProfileDto.username) {
+            updateProfileDto.username = updateProfileDto.username
+                .trim()
+                .toLowerCase();
             const existing = await this.prismaService.user.findUnique({
                 where: { username: updateProfileDto.username },
             });

@@ -1,5 +1,6 @@
 import { PrismaService } from "nestjs-prisma";
 import { getLevelInfo } from "./level.utils";
+import { sendPushToFollowers } from "./push.utils";
 
 export interface AchievementDef {
     id: string;
@@ -93,6 +94,21 @@ export async function checkAndUnlockAchievements(
                 title: titleById.get(id) ?? id,
             })),
         });
+
+        // Push it to followers too, outside the app — one push per
+        // unlock batch (not per achievement) so someone who unlocks
+        // three at once doesn't get spammed.
+        const firstTitle = titleById.get(toUnlock[0]) ?? toUnlock[0];
+        const extra = toUnlock.length - 1;
+        await sendPushToFollowers(
+            prisma,
+            userId,
+            "إنجاز جديد",
+            extra > 0
+                ? `${user.name} فتح إنجاز "${firstTitle}" و${extra} إنجازات أخرى`
+                : `${user.name} فتح إنجاز "${firstTitle}"`,
+            { type: "achievement_unlocked", userId: String(userId) },
+        );
     }
 
     return toUnlock;

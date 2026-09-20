@@ -1,4 +1,4 @@
-import { AnswerType, DeckType, User } from "@prisma/client";
+import { AnswerType, DeckType, User, UserRole } from "@prisma/client";
 import { PrismaService } from "nestjs-prisma";
 import { CardOutDto } from "src/dtos/cards/card.out-dto";
 import { ChangeCardsOrderDto } from "src/dtos/cards/change-cards-order.dto";
@@ -110,18 +110,69 @@ export class DecksCardsService {
         return true;
     }
 
+    /**
+     * Study access (read / answer cards) is NOT the same as edit ownership.
+     * A user may study a deck if it is their own / shared with them, or it is
+     * an admin deck that isn't locked behind a code they haven't entered (a
+     * locked ancestor locks everything below it — same rule as the deck tree).
+     * Admins may access everything. Using the edit-ownership check here made
+     * every regular user get "You can't edit a deck that you don't own" when
+     * opening or answering cards of admin decks.
+     */
+    private async assertCanStudyDecks(user: User, deckIds: number[]) {
+        const ids = [...new Set(deckIds)];
+        if (ids.length === 0) return;
+
+        const decks = new Map<
+            number,
+            { id: number; parent_id: number | null; by_admin: boolean; public: boolean }
+        >();
+        let pending = ids;
+        while (pending.length > 0) {
+            const rows = await this.prismaService.deck.findMany({
+                where: { id: { in: pending } },
+                select: { id: true, parent_id: true, by_admin: true, public: true },
+            });
+            rows.forEach((r) => decks.set(r.id, r));
+            pending = [
+                ...new Set(
+                    rows
+                        .map((r) => r.parent_id)
+                        .filter((p) => p !== null && !decks.has(p)),
+                ),
+            ];
+        }
+        if (ids.some((id) => !decks.has(id)))
+            throw new NotFoundException("Deck not found");
+        if (user.role === UserRole.ADMIN) return;
+
+        const linkedRows = await this.prismaService.userDeck.findMany({
+            where: { user_id: user.id, deck_id: { in: [...decks.keys()] } },
+            select: { deck_id: true },
+        });
+        const linked = new Set(linkedRows.map((r) => r.deck_id));
+
+        const deny = () => {
+            throw new ForbiddenException("You don't have access to this deck");
+        };
+
+        for (const id of ids) {
+            const own = decks.get(id);
+            if (!own.by_admin) {
+                if (!linked.has(own.id)) deny();
+                continue;
+            }
+            let cur = own;
+            while (cur) {
+                if (cur.public && !linked.has(cur.id)) deny();
+                cur =
+                    cur.parent_id !== null ? decks.get(cur.parent_id) : undefined;
+            }
+        }
+    }
+
     async read(user: User, deckId: number) {
-        if (
-            !(await this.decksService.checkOwnership(
-                user,
-                deckId,
-                {},
-                { type: DeckType.CARDS_DECK },
-            ))
-        )
-            GenerateBadRequestException([
-                "You can't edit a deck that you don't own",
-            ]);
+        await this.assertCanStudyDecks(user, [deckId]);
 
         const cards = await this.prismaService.card.findMany({
             where: { deck_id: deckId },
@@ -242,18 +293,7 @@ export class DecksCardsService {
         if (!card) {
             throw new NotFoundException("Card not found");
         }
-        if (
-            !(await this.decksService.checkOwnership(
-                user,
-                card.deck_id,
-                {},
-                { type: DeckType.CARDS_DECK },
-            ))
-        ) {
-            throw new ForbiddenException(
-                "You don't have access to this deck",
-            );
-        }
+        await this.assertCanStudyDecks(user, [card.deck_id]);
 
         const existing = await this.prismaService.cardAnswer.findUnique({
             where: { user_id_card_id: { user_id: user.id, card_id: cardId } },

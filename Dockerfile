@@ -13,19 +13,11 @@ COPY . .
 
 RUN npx prisma generate
 
-# Compile TypeScript -> dist/ ONCE at image-build time, instead of using
-# `nest start`'s dev-mode webpack compiler at runtime. That compiler used
-# to recompile the whole project in memory every time the container
-# booted and stayed resident the whole time the server ran — fragile on
-# a small instance even before, and firebase-admin's large dependency
-# tree (grpc, protobufjs, google-gax) was enough to push that over the
-# memory limit and crash with an OOM. Running the already-compiled JS
-# needs a fraction of the memory.
-# NODE_OPTIONS here only affects this one build step, never the running
-# server — a little headroom in case the build machine is also tight.
-ENV NODE_OPTIONS="--max-old-space-size=1024"
-RUN npm run build
-ENV NODE_OPTIONS=""
+# Compile at BUILD time, not at boot. Before, `nest start` compiled every time
+# the container started; if that compile produced nothing the app crashed with
+# "Cannot find module '/app/dist/main'". Now a compile error fails the deploy
+# with a clear log (the previous version keeps running) and boot is much faster.
+RUN npm run build && ls dist
 
 # Sync the database to prisma/schema.prisma, then start the app.
 # Earlier deploys never ran migrations, so the DB may have no migration
@@ -33,4 +25,6 @@ ENV NODE_OPTIONS=""
 # is missing (xp column, UserAchievement, ActivityEvent) and refuses
 # destructive changes; if it can't run, the server still starts and the
 # reason is in the logs.
-ENTRYPOINT ["sh", "-c", "npx prisma db push --skip-generate || echo 'WARNING: prisma db push failed - starting anyway'; npm run start:prod"]
+# The compiled entry is dist/src/main.js (prisma/ is compiled too); fall back
+# to dist/main.js if the layout ever changes.
+ENTRYPOINT ["sh", "-c", "npx prisma db push --skip-generate || echo 'WARNING: prisma db push failed - starting anyway'; if [ -f dist/src/main.js ]; then exec node dist/src/main.js; else exec node dist/main.js; fi"]

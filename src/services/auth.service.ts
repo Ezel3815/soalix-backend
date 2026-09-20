@@ -188,7 +188,14 @@ export class AuthService {
             },
         });
 
-        this.emailSerivce.sendResetPasswordEmail(updatedUser);
+        // Wait for the result so a failed email is reported to the app
+        // instead of silently telling the user "code sent".
+        const sent = await this.emailSerivce.sendResetPasswordEmail(updatedUser);
+        if (!sent) {
+            GenerateBadRequestException([
+                "Could not send the email right now, please try again later",
+            ]);
+        }
 
         return UserOutDto(updatedUser);
     }
@@ -201,7 +208,7 @@ export class AuthService {
             },
         });
 
-        if (!user) GenerateBadRequestException(["Wrong Email"]);
+        if (!user) GenerateBadRequestException(["Wrong email or code"]);
 
         const updatedUser = await this.prismaService.user.update({
             where: {

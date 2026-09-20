@@ -122,6 +122,18 @@ export class UsersController {
     }
 
     @DAuth()
+    @Get("me/quests")
+    async quests(@DUser() user: User) {
+        return await this.service.getQuests(user.id);
+    }
+
+    @DAuth()
+    @Post("me/quests/claim")
+    async claimQuest(@DUser() user: User, @Body("id") id: string) {
+        return await this.service.claimQuestChest(user.id, String(id ?? ""));
+    }
+
+    @DAuth()
     @Get("me/achievements")
     async achievements(@DUser() user: User) {
         return await this.service.getAchievements(user.id);

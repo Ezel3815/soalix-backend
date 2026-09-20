@@ -21,6 +21,7 @@ import { UpdateMeDto } from "src/dtos/users/update-me.dto";
 import { UpdatePasswordDto } from "src/dtos/users/update-password.dto";
 import { UpdateUserDto } from "src/dtos/users/update-user.dto";
 import { UpdateProfileDto } from "src/dtos/users/update-profile.dto";
+import { UpdateFcmTokenDto } from "src/dtos/users/update-fcm-token.dto";
 import { AuthService } from "src/services/auth.service";
 import { UsersService } from "src/services/users.service";
 import { ApiTags } from "@nestjs/swagger";
@@ -56,6 +57,18 @@ export class UsersController {
         @Body() updateProfileDto: UpdateProfileDto,
     ) {
         return await this.service.updateProfile(user.id, updateProfileDto);
+    }
+
+    @DAuth()
+    @Put("me/fcm-token")
+    async updateFcmToken(
+        @DUser() user: User,
+        @Body() dto: UpdateFcmTokenDto,
+    ) {
+        return await this.service.updateFcmToken(
+            user.id,
+            dto.token && dto.token.length > 0 ? dto.token : null,
+        );
     }
 
     @DAuth()

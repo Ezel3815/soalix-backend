@@ -109,6 +109,12 @@ export class UsersController {
         return await this.service.getFriendsActivityFeed(user.id);
     }
 
+    @DAuth()
+    @Get("by-username/:username")
+    async idByUsername(@Param("username") username: string) {
+        return await this.service.getUserIdByUsername(username);
+    }
+
     @Header("Content-Type", "text/html; charset=utf-8")
     @Get("share/:username")
     async sharePage(@Param("username") username: string) {

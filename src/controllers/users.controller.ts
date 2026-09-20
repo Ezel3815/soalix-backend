@@ -95,6 +95,15 @@ export class UsersController {
     }
 
     @DAuth()
+    @Post(":id/remind")
+    async remind(
+        @DUser() user: User,
+        @Param("id", ParseIntPipe) id: number,
+    ) {
+        return await this.service.remind(user.id, id);
+    }
+
+    @DAuth()
     @Delete(":id/follow")
     async unfollow(
         @DUser() user: User,

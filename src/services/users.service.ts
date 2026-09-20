@@ -21,6 +21,10 @@ import { GenerateUnauthorizedException } from "src/exception/unauthorized.except
 import { v7 as uuid } from "uuid";
 import * as md5 from "md5";
 
+// Feed events addressed to ONE person (shown only in that person's feed,
+// no celebrate / comments): "X followed you" and "X reminds you to study".
+const TARGETED_EVENT_TYPES = ["followed", "reminder"];
+
 @Injectable()
 export class UsersService {
     constructor(private prismaService: PrismaService) {}
@@ -135,8 +139,9 @@ export class UsersService {
             where: { id: eventId },
         });
         if (!event) GenerateBadRequestException(["Post not found"]);
-        if (event.type === "followed") {
-            // "X followed you" is only visible to the person followed.
+        if (TARGETED_EVENT_TYPES.includes(event.type)) {
+            // "X followed you" / "X reminded you" are only visible to the
+            // person they are addressed to.
             if (event.target_user_id !== userId)
                 GenerateBadRequestException(["Post not found"]);
         } else if (event.user_id !== userId) {
@@ -160,9 +165,10 @@ export class UsersService {
                 OR: [
                     // own + followed users' activity (follow events excluded:
                     // they are private notifications, see below)
-                    { user_id: { in: ids }, type: { not: "followed" } },
-                    // "X followed you" — only for the person followed
-                    { type: "followed", target_user_id: userId },
+                    { user_id: { in: ids }, type: { notIn: TARGETED_EVENT_TYPES } },
+                    // "X followed you" / "X reminded you" — only for the
+                    // person they are addressed to
+                    { type: { in: TARGETED_EVENT_TYPES }, target_user_id: userId },
                 ],
             },
             orderBy: { created_at: "desc" },
@@ -194,7 +200,7 @@ export class UsersService {
 
     async toggleCelebrate(userId: number, eventId: number) {
         const event = await this.assertFeedEventVisible(userId, eventId);
-        if (event.type === "followed")
+        if (TARGETED_EVENT_TYPES.includes(event.type))
             GenerateBadRequestException(["You can't celebrate this post"]);
         if (event.user_id === userId)
             GenerateBadRequestException(["You can't celebrate your own post"]);
@@ -246,7 +252,7 @@ export class UsersService {
 
     async addFeedComment(userId: number, eventId: number, text: string) {
         const target = await this.assertFeedEventVisible(userId, eventId);
-        if (target.type === "followed")
+        if (TARGETED_EVENT_TYPES.includes(target.type))
             GenerateBadRequestException(["You can't comment on this post"]);
         const clean = String(text ?? "").trim();
         if (clean.length < 1 || clean.length > 300)
@@ -294,7 +300,10 @@ export class UsersService {
         if (followingIds.length === 0) return [];
 
         const events = await this.prismaService.activityEvent.findMany({
-            where: { user_id: { in: followingIds }, type: { not: "followed" } },
+            where: {
+                user_id: { in: followingIds },
+                type: { notIn: TARGETED_EVENT_TYPES },
+            },
             orderBy: { created_at: "desc" },
             take: 20,
             include: { user: true },
@@ -456,6 +465,53 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
         }
 
         return true;
+    }
+
+    /// "Remind a friend to study": drops a private notification into the
+    /// friend's Feed (type "reminder"). At most one per pair per 24h so it
+    /// can't be used to spam someone. Returns { sent: false } (not an
+    /// error) when today's reminder was already sent.
+    async remind(senderId: number, targetId: number) {
+        if (senderId === targetId) {
+            GenerateBadRequestException(["You can't remind yourself"]);
+        }
+
+        const targetUser = await this.prismaService.user.findUnique({
+            where: { id: targetId },
+        });
+        if (!targetUser) GenerateBadRequestException(["User does not exist"]);
+
+        const follows = await this.prismaService.follow.findUnique({
+            where: {
+                followerId_followingId: {
+                    followerId: senderId,
+                    followingId: targetId,
+                },
+            },
+        });
+        if (!follows) {
+            GenerateBadRequestException(["You can only remind people you follow"]);
+        }
+
+        const recent = await this.prismaService.activityEvent.findFirst({
+            where: {
+                user_id: senderId,
+                target_user_id: targetId,
+                type: "reminder",
+                created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            },
+        });
+        if (recent) return { sent: false };
+
+        await this.prismaService.activityEvent.create({
+            data: {
+                user_id: senderId,
+                target_user_id: targetId,
+                type: "reminder",
+                title: "reminder",
+            },
+        });
+        return { sent: true };
     }
 
     /** People who follow `targetId` ("followers") or whom they follow ("following"). */

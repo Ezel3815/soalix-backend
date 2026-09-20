@@ -129,11 +129,18 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
             countSince(userId, b.monthStart),
             countSince(userId, b.today),
             // BUG #4: count durable mastery records, not the card's live state.
+            // UserAchievement's timestamp column is `unlocked_at`, not
+            // `created_at` — and since the achievement_id already embeds
+            // today's date (mastery:<cardId>:<day>), matching on the id
+            // suffix is both correct and doesn't depend on clock skew
+            // between when the row's timestamp was set and "today".
             prisma.userAchievement.count({
                 where: {
                     user_id: userId,
-                    achievement_id: { startsWith: "mastery:" },
-                    created_at: { gte: b.today },
+                    achievement_id: {
+                        startsWith: "mastery:",
+                        endsWith: dayKey(b.today),
+                    },
                 },
             }),
             prisma.activityEvent.count({

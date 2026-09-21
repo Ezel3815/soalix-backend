@@ -67,21 +67,41 @@ function claimKey(chestId: string, now: Date) {
     return `claim:${chestId}:${dayKey(b.today)}`;
 }
 
-async function findPartnerId(prisma: PrismaService, userId: number) {
+/** People who follow you AND whom you follow, newest first. */
+export async function getMutualFriendIds(
+    prisma: PrismaService,
+    userId: number,
+): Promise<number[]> {
     const following = await prisma.follow.findMany({
         where: { followerId: userId },
         select: { followingId: true },
         orderBy: { created_at: "desc" },
     });
     const ids = following.map((f) => f.followingId);
-    if (ids.length === 0) return null;
+    if (ids.length === 0) return [];
 
     const mutual = await prisma.follow.findMany({
         where: { followerId: { in: ids }, followingId: userId },
         select: { followerId: true },
     });
     const mutualSet = new Set(mutual.map((m) => m.followerId));
-    return ids.find((id) => mutualSet.has(id)) ?? null;
+    return ids.filter((id) => mutualSet.has(id));
+}
+
+/**
+ * The friend the user CHOSE for the friends quest (never picked for them).
+ * If the friendship is no longer mutual the pairing is dropped and the user
+ * is asked to choose again.
+ */
+async function findPartnerId(prisma: PrismaService, userId: number) {
+    const me = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { quest_partner_id: true },
+    });
+    const chosen = me?.quest_partner_id;
+    if (!chosen) return null;
+    const mutual = await getMutualFriendIds(prisma, userId);
+    return mutual.includes(chosen) ? chosen : null;
 }
 
 /**
@@ -153,10 +173,11 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
             countSince(userId, b.weekStart),
         ]);
 
-    // Friends quest: paired with the most recent mutual friend.
+    // Friends quest: paired with the friend the user chose.
     const partnerId = await findPartnerId(prisma, userId);
     let partner: any = null;
     let partnerWeek = 0;
+    let partnerStudiedToday = false;
     if (partnerId !== null) {
         const p = await prisma.user.findUnique({ where: { id: partnerId } });
         if (p) {
@@ -167,6 +188,8 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
                 avatar_hair: p.avatar_hair,
             };
             partnerWeek = await countSince(p.id, b.weekStart);
+            partnerStudiedToday = (await countSince(p.id, b.today)) > 0;
+            partner.studied_today = partnerStudiedToday;
         }
     }
     const friendsTotal = myWeek + partnerWeek;
@@ -194,7 +217,12 @@ export async function getQuestsForUser(prisma: PrismaService, userId: number) {
             target: FRIENDS_TARGET,
             my_count: myWeek,
             partner_count: partnerWeek,
-            me: { id: me.id, name: me.name, avatar_hair: me.avatar_hair },
+            me: {
+                id: me.id,
+                name: me.name,
+                avatar_hair: me.avatar_hair,
+                studied_today: reviewsToday > 0,
+            },
             partner,
             chest: {
                 id: "friends",

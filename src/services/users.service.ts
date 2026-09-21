@@ -15,7 +15,11 @@ import { UserOutDto, UserProfileOutDto } from "src/dtos/users/user.out-dto";
 import { getLevelInfo } from "src/utils/level.utils";
 import { startOfUtcDay, isSameUtcDay } from "src/utils/date.utils";
 import { getAchievementsForUser } from "src/utils/achievement.utils";
-import { claimQuestChest, getQuestsForUser } from "src/utils/quests.utils";
+import {
+    claimQuestChest,
+    getMutualFriendIds,
+    getQuestsForUser,
+} from "src/utils/quests.utils";
 import { GenerateBadRequestException } from "src/exception/bad-request.exception";
 import { GenerateUnauthorizedException } from "src/exception/unauthorized.exception";
 import {
@@ -28,7 +32,7 @@ import * as md5 from "md5";
 
 // Feed events addressed to ONE person (shown only in that person's feed,
 // no celebrate / comments): "X followed you" and "X reminds you to study".
-const TARGETED_EVENT_TYPES = ["followed", "reminder"];
+const TARGETED_EVENT_TYPES = ["followed", "reminder", "challenge_invite"];
 
 @Injectable()
 export class UsersService {
@@ -601,7 +605,17 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
                 created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
             },
         });
-        if (recent) return { sent: false };
+        if (recent) return { sent: false, reason: "already_sent" };
+
+        // Nothing to nudge if they've already studied today.
+        const studiedToday =
+            (await this.prismaService.cardAnswer.count({
+                where: {
+                    user_id: targetId,
+                    updated_at: { gte: startOfUtcDay(new Date()) },
+                },
+            })) > 0;
+        if (studiedToday) return { sent: false, reason: "already_studied" };
 
         await this.prismaService.activityEvent.create({
             data: {
@@ -611,7 +625,99 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
                 title: "reminder",
             },
         });
+
+        // A real notification outside the app too (sent in the background).
+        runInBackground(async () => {
+            const sender = await this.prismaService.user.findUnique({
+                where: { id: senderId },
+                select: { name: true },
+            });
+            await sendPushToUser(
+                this.prismaService,
+                targetId,
+                "تذكير من صديق",
+                `${sender?.name ?? "صديقك"} يذكّرك بالمذاكرة اليوم 📚`,
+                { type: "reminder", userId: String(senderId) },
+            );
+        });
         return { sent: true };
+    }
+
+    /** Mutual friends the user can pick as their friends-quest partner. */
+    async getQuestFriends(userId: number) {
+        const ids = await getMutualFriendIds(this.prismaService, userId);
+        if (ids.length === 0) return [];
+        const [users, me] = await Promise.all([
+            this.prismaService.user.findMany({ where: { id: { in: ids } } }),
+            this.prismaService.user.findUnique({
+                where: { id: userId },
+                select: { quest_partner_id: true },
+            }),
+        ]);
+        const byId = new Map(users.map((u) => [u.id, u]));
+        return ids
+            .filter((id) => byId.has(id))
+            .map((id) => ({
+                id,
+                name: byId.get(id).name,
+                username: byId.get(id).username,
+                avatar_hair: byId.get(id).avatar_hair,
+                is_partner: id === me?.quest_partner_id,
+            }));
+    }
+
+    /** Choose who the friends quest is played with (must be a mutual friend). */
+    async setQuestPartner(userId: number, friendId: number) {
+        if (userId === friendId)
+            GenerateBadRequestException(["Pick a friend, not yourself"]);
+        const mutual = await getMutualFriendIds(this.prismaService, userId);
+        if (!mutual.includes(friendId))
+            GenerateBadRequestException([
+                "You can only pick a friend who follows you back",
+            ]);
+
+        const me = await this.prismaService.user.findUnique({
+            where: { id: userId },
+            select: { quest_partner_id: true, name: true },
+        });
+        await this.prismaService.user.update({
+            where: { id: userId },
+            data: { quest_partner_id: friendId },
+        });
+
+        // Tell the friend they were invited (feed post + push), once a day.
+        if (me?.quest_partner_id !== friendId) {
+            const recent = await this.prismaService.activityEvent.findFirst({
+                where: {
+                    user_id: userId,
+                    target_user_id: friendId,
+                    type: "challenge_invite",
+                    created_at: {
+                        gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                    },
+                },
+            });
+            if (!recent) {
+                await this.prismaService.activityEvent.create({
+                    data: {
+                        user_id: userId,
+                        target_user_id: friendId,
+                        type: "challenge_invite",
+                        title: "challenge_invite",
+                    },
+                });
+                runInBackground(() =>
+                    sendPushToUser(
+                        this.prismaService,
+                        friendId,
+                        "دعوة تحدٍّ",
+                        `${me?.name ?? "صديقك"} دعاك لتحدي الأصدقاء هذا الأسبوع 🏆`,
+                        { type: "challenge_invite", userId: String(userId) },
+                    ),
+                );
+            }
+        }
+        return { ok: true };
     }
 
     /** People who follow `targetId` ("followers") or whom they follow ("following"). */

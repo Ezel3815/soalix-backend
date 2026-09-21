@@ -23,6 +23,7 @@ import { DecksCardsController } from "./controllers/decks-cards.controller";
 import { DecksCardsService } from "./services/decks-cards.service";
 import { MediaController } from "./controllers/media.controller";
 import { MediaService } from "./services/media.service";
+import { ImageRestoreController } from "./controllers/image-restore.controller";
 import { ServeStaticModule } from "@nestjs/serve-static";
 import { join } from "path";
 
@@ -45,6 +46,7 @@ import { join } from "path";
         DecksController,
         DecksCardsController,
         MediaController,
+        ImageRestoreController,
     ],
     providers: [
         AppService,

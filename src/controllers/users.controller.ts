@@ -196,6 +196,21 @@ export class UsersController {
     }
 
     @DAuth()
+    @Get("me/quests/friends")
+    async questFriends(@DUser() user: User) {
+        return await this.service.getQuestFriends(user.id);
+    }
+
+    @DAuth()
+    @Put("me/quests/partner")
+    async setQuestPartner(
+        @DUser() user: User,
+        @Body("friend_id", ParseIntPipe) friendId: number,
+    ) {
+        return await this.service.setQuestPartner(user.id, friendId);
+    }
+
+    @DAuth()
     @Get("me/quests")
     async quests(@DUser() user: User) {
         return await this.service.getQuests(user.id);

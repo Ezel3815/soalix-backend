@@ -37,6 +37,14 @@ function getApp(): admin.app.App | null {
     }
 }
 
+/// Runs a notification job WITHOUT making the caller wait for it. Sending
+/// through Firebase can take seconds (cold start, many followers); doing it
+/// inside the request made "follow" and "answer card" feel frozen. Errors are
+/// logged, never thrown.
+export function runInBackground(job: () => Promise<unknown>) {
+    void job().catch((e) => console.error("Background push job failed:", e));
+}
+
 /// Sends a single push notification to one device token. Never throws —
 /// a push failing (stale token, no credentials, network hiccup) must
 /// never break the request that triggered it (following someone,
@@ -99,12 +107,25 @@ export async function sendPushToFollowers(
     data?: Record<string, string>,
 ) {
     if (!getApp()) return; // skip the query entirely when push is disabled
-    const followers = await prisma.follow.findMany({
-        where: { followingId: actorId },
-        select: { follower: { select: { fcm_token: true } } },
-    });
-    const tokens = followers
-        .map((f) => f.follower.fcm_token)
-        .filter((t): t is string => !!t);
+    const [followers, actor] = await Promise.all([
+        prisma.follow.findMany({
+            where: { followingId: actorId },
+            select: { follower: { select: { fcm_token: true } } },
+        }),
+        prisma.user.findUnique({
+            where: { id: actorId },
+            select: { fcm_token: true },
+        }),
+    ]);
+    // One push per DEVICE: several accounts logged in on the same phone share
+    // a token, which used to send the same notification N times — and never
+    // notify the actor's own device about their own activity.
+    const tokens = [
+        ...new Set(
+            followers
+                .map((f) => f.follower.fcm_token)
+                .filter((t): t is string => !!t && t !== actor?.fcm_token),
+        ),
+    ];
     await Promise.all(tokens.map((t) => sendPushToToken(t, title, body, data)));
 }

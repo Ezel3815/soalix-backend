@@ -4,6 +4,7 @@ import { AppModule } from "./app.module";
 import { ValidationPipe } from "@nestjs/common";
 import { join } from "path";
 import { AllExceptionsFilter } from "./filter/all-exceptions.filter";
+import { PrismaExceptionFilter } from "./filter/prisma-exception.filter";
 
 // FIX: on a free-tier host, Prisma's default pool size (2x CPU cores + 1)
 // can exceed what the free-tier database plan actually allows, and every
@@ -39,7 +40,11 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup("api", app, document);
 
-    app.useGlobalFilters(new AllExceptionsFilter());
+    // PrismaExceptionFilter must come first: Nest checks filters in order
+    // and picks the first one whose @Catch() type matches. AllExceptionsFilter
+    // has no type (@Catch() with no args), so it matches everything - if it
+    // were first, PrismaExceptionFilter would never run.
+    app.useGlobalFilters(new PrismaExceptionFilter(), new AllExceptionsFilter());
 
     app.useGlobalPipes(new ValidationPipe({ transform: true }));
     app.enableCors();

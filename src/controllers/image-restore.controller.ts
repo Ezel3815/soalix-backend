@@ -36,12 +36,27 @@ export class ImageRestoreController {
     //                 (= picture from the old, shut-down server)
     // mode=missing -> card has no picture at all (front AND back empty)
     // Optional: deck_id, after (last card id of previous page), limit (max 100)
+    // Selecting a subject or chapter in the dropdown should include every
+    // card in the decks nested under it, not just cards on that exact deck.
+    private async deckAndDescendantIds(rootId: number): Promise<number[]> {
+        const ids = [rootId];
+        let frontier = [rootId];
+        while (frontier.length) {
+            const kids = await this.prisma.deck.findMany({
+                where: { parent_id: { in: frontier } },
+                select: { id: true },
+            });
+            frontier = kids.map((k) => k.id);
+            ids.push(...frontier);
+        }
+        return ids;
+    }
+
     @DRole()
     @Get()
     async list(
         @Query("mode") mode: string = "broken",
         @Query("deck_id") deckId?: string,
-        @Query("deck_title") deckTitle?: string,
         @Query("after") after?: string,
         @Query("limit") limit?: string,
     ) {
@@ -51,18 +66,11 @@ export class ImageRestoreController {
         const and: Prisma.CardWhereInput[] = [
             { type: { not: CardType.OCCLUSION } },
         ];
-        if (deckId) and.push({ deck_id: Number(deckId) });
-        if (deckTitle) {
-            // match the deck itself or its parent / grandparent by name
-            const t = { contains: deckTitle };
-            and.push({
-                OR: [
-                    { deck: { title: t } },
-                    { deck: { parent: { title: t } } },
-                    { deck: { parent: { parent: { title: t } } } },
-                ],
-            });
+        if (deckId) {
+            const ids = await this.deckAndDescendantIds(Number(deckId));
+            and.push({ deck_id: { in: ids } });
         }
+
         if (mode === "missing") {
             and.push({ front_image_name: null, back_image_name: null });
         } else {

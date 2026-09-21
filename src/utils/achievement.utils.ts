@@ -1,6 +1,6 @@
 import { PrismaService } from "nestjs-prisma";
 import { getLevelInfo } from "./level.utils";
-import { sendPushToFollowers } from "./push.utils";
+import { runInBackground, sendPushToFollowers } from "./push.utils";
 
 export interface AchievementDef {
     id: string;
@@ -76,19 +76,29 @@ export async function checkAndUnlockAchievements(
         .filter(([id, met]) => met && !alreadyIds.has(id))
         .map(([id]) => id);
 
-    if (toUnlock.length > 0) {
-        await prisma.userAchievement.createMany({
-            data: toUnlock.map((achievement_id) => ({
-                user_id: userId,
-                achievement_id,
-            })),
-        });
+    // Unlock exactly once even when several requests run this check at the
+    // same time (answering cards quickly): the (user, achievement) primary
+    // key lets only ONE insert win; the others get P2002 and must not create
+    // a feed event or send a push. Only what we really inserted counts.
+    const unlocked: string[] = [];
+    for (const achievement_id of toUnlock) {
+        try {
+            await prisma.userAchievement.create({
+                data: { user_id: userId, achievement_id },
+            });
+            unlocked.push(achievement_id);
+        } catch (e: any) {
+            if (e?.code !== "P2002") throw e;
+        }
+    }
+
+    if (unlocked.length > 0) {
 
         // Feed friends' achievement unlocks into the activity feed —
         // reuses this exact moment rather than a separate tracking path.
         const titleById = new Map(ACHIEVEMENTS.map((a) => [a.id, a.title]));
         await prisma.activityEvent.createMany({
-            data: toUnlock.map((id) => ({
+            data: unlocked.map((id) => ({
                 user_id: userId,
                 type: "achievement_unlocked",
                 title: titleById.get(id) ?? id,
@@ -98,20 +108,22 @@ export async function checkAndUnlockAchievements(
         // Push it to followers too, outside the app — one push per
         // unlock batch (not per achievement) so someone who unlocks
         // three at once doesn't get spammed.
-        const firstTitle = titleById.get(toUnlock[0]) ?? toUnlock[0];
-        const extra = toUnlock.length - 1;
-        await sendPushToFollowers(
-            prisma,
-            userId,
-            "إنجاز جديد",
-            extra > 0
-                ? `${user.name} فتح إنجاز "${firstTitle}" و${extra} إنجازات أخرى`
-                : `${user.name} فتح إنجاز "${firstTitle}"`,
-            { type: "achievement_unlocked", userId: String(userId) },
+        const firstTitle = titleById.get(unlocked[0]) ?? unlocked[0];
+        const extra = unlocked.length - 1;
+        runInBackground(() =>
+            sendPushToFollowers(
+                prisma,
+                userId,
+                "إنجاز جديد",
+                extra > 0
+                    ? `${user.name} فتح إنجاز "${firstTitle}" و${extra} إنجازات أخرى`
+                    : `${user.name} فتح إنجاز "${firstTitle}"`,
+                { type: "achievement_unlocked", userId: String(userId) },
+            ),
         );
     }
 
-    return toUnlock;
+    return unlocked;
 }
 
 export async function getAchievementsForUser(

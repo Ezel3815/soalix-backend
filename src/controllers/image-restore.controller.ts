@@ -1,0 +1,155 @@
+import {
+    BadRequestException,
+    Body,
+    Controller,
+    Get,
+    MaxFileSizeValidator,
+    NotFoundException,
+    Param,
+    ParseFilePipe,
+    ParseIntPipe,
+    Post,
+    Query,
+    UploadedFile,
+    UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiConsumes, ApiTags } from "@nestjs/swagger";
+import { CardType, MediaType, Prisma } from "@prisma/client";
+import { PrismaService } from "nestjs-prisma";
+import { DRole } from "src/decorators/role.decorator";
+import { MediaService } from "src/services/media.service";
+
+// Admin-only helpers for the dashboard "Restore images" page.
+// GET  /image-restore            -> cards that need a picture (50 per page)
+// POST /image-restore/:cardId    -> upload a picture + attach it to ONE side
+//                                   of the card (never touches card.data).
+@ApiTags("Image restore")
+@Controller("image-restore")
+export class ImageRestoreController {
+    constructor(
+        private prisma: PrismaService,
+        private media: MediaService,
+    ) {}
+
+    // mode=broken  -> card has an image name that is NOT a web link
+    //                 (= picture from the old, shut-down server)
+    // mode=missing -> card has no picture at all (front AND back empty)
+    // Optional: deck_id, after (last card id of previous page), limit (max 100)
+    @DRole()
+    @Get()
+    async list(
+        @Query("mode") mode: string = "broken",
+        @Query("deck_id") deckId?: string,
+        @Query("after") after?: string,
+        @Query("limit") limit?: string,
+    ) {
+        const take = Math.min(Number(limit) || 50, 100);
+        const isLink = { startsWith: "http" };
+
+        const base: Prisma.CardWhereInput = {
+            type: { not: CardType.OCCLUSION },
+        };
+        if (deckId) base.deck_id = Number(deckId);
+
+        const where: Prisma.CardWhereInput =
+            mode === "missing"
+                ? { ...base, front_image_name: null, back_image_name: null }
+                : {
+                      ...base,
+                      OR: [
+                          {
+                              AND: [
+                                  { front_image_name: { not: null } },
+                                  { NOT: { front_image_name: isLink } },
+                              ],
+                          },
+                          {
+                              AND: [
+                                  { back_image_name: { not: null } },
+                                  { NOT: { back_image_name: isLink } },
+                              ],
+                          },
+                      ],
+                  };
+
+        // Sequential on purpose: the free DB has a tiny connection pool.
+        const total = await this.prisma.card.count({ where });
+        const cards = await this.prisma.card.findMany({
+            where: after ? { AND: [where, { id: { gt: Number(after) } }] } : where,
+            orderBy: { id: "asc" },
+            take,
+            include: { deck: { select: { title: true } } },
+        });
+
+        return {
+            total,
+            next_after: cards.length ? cards[cards.length - 1].id : null,
+            cards: cards.map((c) => {
+                let data: any = c.data;
+                if (typeof data === "string") {
+                    try {
+                        data = JSON.parse(data);
+                    } catch {}
+                }
+                const frontBroken =
+                    !!c.front_image_name && !c.front_image_name.startsWith("http");
+                return {
+                    id: c.id,
+                    deck_id: c.deck_id,
+                    deck_title: c.deck?.title,
+                    type: c.type,
+                    // which side held the old picture (null in "missing" mode)
+                    side:
+                        mode === "missing" ? null : frontBroken ? "front" : "back",
+                    data,
+                };
+            }),
+        };
+    }
+
+    @DRole()
+    @UseInterceptors(FileInterceptor("file"))
+    @ApiConsumes("multipart/form-data")
+    @Post(":cardId")
+    async attach(
+        @Param("cardId", ParseIntPipe) cardId: number,
+        @Body("side") side: string,
+        @UploadedFile(
+            new ParseFilePipe({
+                validators: [
+                    new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }),
+                ],
+            }),
+        )
+        file: Express.Multer.File,
+    ) {
+        if (side !== "front" && side !== "back")
+            throw new BadRequestException("side must be 'front' or 'back'");
+
+        const card = await this.prisma.card.findUnique({
+            where: { id: cardId },
+        });
+        if (!card) throw new NotFoundException("Card not found");
+        if (card.type === CardType.OCCLUSION)
+            throw new BadRequestException(
+                "Occlusion cards need their masks redrawn; not supported here",
+            );
+
+        const oldName =
+            side === "front" ? card.front_image_name : card.back_image_name;
+
+        const media = await this.media.create(file, MediaType.IMAGE);
+        await this.prisma.card.update({
+            where: { id: cardId },
+            data:
+                side === "front"
+                    ? { front_image_name: media.name }
+                    : { back_image_name: media.name },
+        });
+        // Drop the dead reference (safe: errors are swallowed inside delete()).
+        if (oldName) await this.media.delete(oldName);
+
+        return { id: cardId, side, url: media.name };
+    }
+}

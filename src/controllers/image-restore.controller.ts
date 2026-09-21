@@ -41,42 +41,56 @@ export class ImageRestoreController {
     async list(
         @Query("mode") mode: string = "broken",
         @Query("deck_id") deckId?: string,
+        @Query("deck_title") deckTitle?: string,
         @Query("after") after?: string,
         @Query("limit") limit?: string,
     ) {
         const take = Math.min(Number(limit) || 50, 100);
         const isLink = { startsWith: "http" };
 
-        const base: Prisma.CardWhereInput = {
-            type: { not: CardType.OCCLUSION },
-        };
-        if (deckId) base.deck_id = Number(deckId);
-
-        const where: Prisma.CardWhereInput =
-            mode === "missing"
-                ? { ...base, front_image_name: null, back_image_name: null }
-                : {
-                      ...base,
-                      OR: [
-                          {
-                              AND: [
-                                  { front_image_name: { not: null } },
-                                  { NOT: { front_image_name: isLink } },
-                              ],
-                          },
-                          {
-                              AND: [
-                                  { back_image_name: { not: null } },
-                                  { NOT: { back_image_name: isLink } },
-                              ],
-                          },
-                      ],
-                  };
+        const and: Prisma.CardWhereInput[] = [
+            { type: { not: CardType.OCCLUSION } },
+        ];
+        if (deckId) and.push({ deck_id: Number(deckId) });
+        if (deckTitle) {
+            // match the deck itself or its parent / grandparent by name
+            const t = { contains: deckTitle };
+            and.push({
+                OR: [
+                    { deck: { title: t } },
+                    { deck: { parent: { title: t } } },
+                    { deck: { parent: { parent: { title: t } } } },
+                ],
+            });
+        }
+        if (mode === "missing") {
+            and.push({ front_image_name: null, back_image_name: null });
+        } else {
+            and.push({
+                OR: [
+                    {
+                        AND: [
+                            { front_image_name: { not: null } },
+                            { NOT: { front_image_name: isLink } },
+                        ],
+                    },
+                    {
+                        AND: [
+                            { back_image_name: { not: null } },
+                            { NOT: { back_image_name: isLink } },
+                        ],
+                    },
+                ],
+            });
+        }
+        const where: Prisma.CardWhereInput = { AND: and };
 
         // Sequential on purpose: the free DB has a tiny connection pool.
         const total = await this.prisma.card.count({ where });
         const cards = await this.prisma.card.findMany({
-            where: after ? { AND: [where, { id: { gt: Number(after) } }] } : where,
+            where: after
+                ? { AND: [...and, { id: { gt: Number(after) } }] }
+                : where,
             orderBy: { id: "asc" },
             take,
             include: { deck: { select: { title: true } } },

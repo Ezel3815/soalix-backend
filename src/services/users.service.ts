@@ -850,10 +850,57 @@ b{color:#4f9d69}.open{display:inline-block;background:#4f9d69;color:#fff;padding
         );
     }
 
-    //TODO: delete all owned decks.
+    // Deletes a user and everything in other tables that references them.
+    // Decks are NOT deleted here: this schema has no owner_id on Deck —
+    // access/ownership is entirely through the UserDeck join table (a deck
+    // can be shared/public/attached via a Code to many users), so only
+    // this user's UserDeck rows (their access) are removed. A deck that
+    // was personal and never shared becomes orphaned (inaccessible) but
+    // stays in the DB — see the fix notes if you want that changed.
     async delete(id: number) {
-        const user = await this.prismaService.user.delete({ where: { id } });
+        const user = await this.prismaService.user.findUnique({ where: { id } });
         if (!user) GenerateBadRequestException(["User does not exist"]);
+
+        await this.prismaService.$transaction([
+            // 1. this user's own reactions/comments on OTHER people's events
+            //    (reactions/comments on events being deleted below are
+            //    handled automatically by the schema's onDelete: Cascade
+            //    on ActivityReaction/ActivityComment -> ActivityEvent)
+            this.prismaService.activityReaction.deleteMany({ where: { user_id: id } }),
+            this.prismaService.activityComment.deleteMany({ where: { user_id: id } }),
+
+            // 2. events this user authored or was the target of ("X
+            //    followed you", "X reminded you")
+            this.prismaService.activityEvent.deleteMany({
+                where: { OR: [{ user_id: id }, { target_user_id: id }] },
+            }),
+
+            // 3. achievements
+            this.prismaService.userAchievement.deleteMany({ where: { user_id: id } }),
+
+            // 4. study history
+            this.prismaService.cardAnswer.deleteMany({ where: { user_id: id } }),
+
+            // 5. social graph, both directions
+            this.prismaService.follow.deleteMany({
+                where: { OR: [{ followerId: id }, { followingId: id }] },
+            }),
+
+            // 6. this user's deck access/edit rights (see note above the method)
+            this.prismaService.userDeck.deleteMany({ where: { user_id: id } }),
+
+            // 7. quest_partner_id has no DB-level foreign key in this schema
+            //    (plain Int?, no @relation), so it can't block the delete —
+            //    but clear it anyway so no other user points at a deleted id
+            this.prismaService.user.updateMany({
+                where: { quest_partner_id: id },
+                data: { quest_partner_id: null },
+            }),
+
+            // 8. finally the user
+            this.prismaService.user.delete({ where: { id } }),
+        ]);
+
         return true;
     }
 }

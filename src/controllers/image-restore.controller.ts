@@ -92,21 +92,28 @@ export class ImageRestoreController {
             });
         }
         const where: Prisma.CardWhereInput = { AND: and };
+        // Match the order cards actually appear in the app: its own "order"
+        // field within a deck, not DB creation id (only meaningful once a
+        // single deck is picked - across mixed decks id order is kept).
+        const byOrder = !!deckId;
+        const cursorField = byOrder ? "order" : "id";
 
         // Sequential on purpose: the free DB has a tiny connection pool.
         const total = await this.prisma.card.count({ where });
         const cards = await this.prisma.card.findMany({
             where: after
-                ? { AND: [...and, { id: { gt: Number(after) } }] }
+                ? { AND: [...and, { [cursorField]: { gt: Number(after) } }] }
                 : where,
-            orderBy: { id: "asc" },
+            orderBy: byOrder ? { order: "asc" } : { id: "asc" },
             take,
             include: { deck: { select: { title: true } } },
         });
 
         return {
             total,
-            next_after: cards.length ? cards[cards.length - 1].id : null,
+            next_after: cards.length
+                ? cards[cards.length - 1][byOrder ? "order" : "id"]
+                : null,
             cards: cards.map((c) => {
                 let data: any = c.data;
                 if (typeof data === "string") {

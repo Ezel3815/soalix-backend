@@ -42,7 +42,7 @@ jobs:
         run: echo "Mosaic CI test DB -> host=127.0.0.1 port=3306 database=mosaic_ci_test user=ciuser"
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Generate Prisma client
         run: npx prisma generate

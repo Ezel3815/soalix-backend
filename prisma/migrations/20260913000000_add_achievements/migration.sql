@@ -1,6 +1,6 @@
 -- Defensive: adds `xp` only if it isn't already there, in case the
 -- earlier add_user_xp migration didn't fully apply on your database.
-ALTER TABLE `User` ADD COLUMN IF NOT EXISTS `xp` INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE `User` ADD COLUMN `xp` INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS `UserAchievement` (
     `user_id` INTEGER NOT NULL,

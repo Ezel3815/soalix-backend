@@ -1,5 +1,5 @@
 -- Mosaic progression: user timezone + season / day ledger / pieces.
-ALTER TABLE `User` ADD COLUMN IF NOT EXISTS `timezone` VARCHAR(64) NULL;
+ALTER TABLE `User` ADD COLUMN `timezone` VARCHAR(64) NULL;
 
 CREATE TABLE IF NOT EXISTS `MosaicSeason` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
